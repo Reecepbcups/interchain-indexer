@@ -1,0 +1,3 @@
+blocks/*.json
+latest_height.txt
+__pycache__/
