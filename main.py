@@ -43,7 +43,6 @@ ignore = [
 
 latest_height = -1
 
-
 def download_block(height: int):
     # Skip already downloaded height data
     if db.get_block_txs(height) != None:
@@ -172,10 +171,13 @@ def test_get_data():
     total = db.get_total_blocks()
     print("Total Blocks", total)
 
+    init_height = 6_000_000
+    end_height = 6_002_463
+
     range_count = db.get_type_count_over_range(
-        "/cosmwasm.wasm.v1.MsgExecuteContract", 7781750, 7782188
+        "/cosmwasm.wasm.v1.MsgExecuteContract", init_height, end_height
     )
-    all_range = db.get_all_count_over_range(7781750, 7782188)
+    all_range = db.get_all_count_over_range(init_height, end_height)
     print(sum(range_count))
     print(sum(all_range))
 
@@ -185,7 +187,7 @@ def test_get_data():
 
 # from websocket import create_connection
 if __name__ == "__main__":
-    db = Database("data.db")
+    db = Database(os.path.join(current_dir, "data.db"))
     # db.drop_all()
     db.create_tables()
 
@@ -210,7 +212,7 @@ if __name__ == "__main__":
         rel.signal(2, rel.abort)  # Keyboard Interrupt
         rel.dispatch()
     else:
-        if True:
+        if False:
             test_get_data()
 
         # while loop, every 6 seconds query the RPC for latest and download. Try catch
