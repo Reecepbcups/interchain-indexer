@@ -1,7 +1,11 @@
 """
 We subscribe to check when the latest block is updated, then we query it normally via the RPC & save it
-"""
 
+Flow:
+- Async save to JSON files (each are unique so its good)
+- Then have every X blocks maybe, call an SQL method sync which takes all the saved JSON and loads it insert
+- There is a LOT of disk IO with this approach. I just do not feel like making SQLite async right now
+"""
 # TODO: save Tx types to a table over time
 
 import json
@@ -11,6 +15,7 @@ import time
 import httpx
 import rel
 import websocket
+
 from SQL import Database
 from util import (
     decode_txs,
@@ -42,6 +47,7 @@ ignore = [
 ]
 
 latest_height = -1
+
 
 def download_block(height: int):
     # Skip already downloaded height data
