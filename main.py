@@ -172,7 +172,7 @@ def test_get_data():
     print("Total Blocks", total)
 
     init_height = 6_000_000
-    end_height = 6_002_463
+    end_height = 6079585
 
     range_count = db.get_type_count_over_range(
         "/cosmwasm.wasm.v1.MsgExecuteContract", init_height, end_height

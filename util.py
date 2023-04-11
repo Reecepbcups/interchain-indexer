@@ -29,7 +29,7 @@ def decode_txs(COSMOS_BINARY_FILE: str, block_txs: list[str]) -> list:
 
 
 def get_sender(msg: dict, WALLET_PREFIX: str) -> str | None:
-    keys = ["sender", "delegator_address", "from_address", "grantee", "voter", "signer"]
+    keys = ["sender", "delegator_address", "from_address", "grantee", "voter", "signer", "depositor", "proposer"]
 
     for key in keys:
         if key in msg.keys():
