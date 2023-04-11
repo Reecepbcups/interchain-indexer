@@ -7,12 +7,15 @@ class Database:
         self.conn = sqlite3.connect(db)
         self.cur = self.conn.cursor()
 
+    def commit(self):
+        self.conn.commit()
+
     def drop_all(self):
         self.cur.execute("""DROP TABLE IF EXISTS blocks""")
         self.cur.execute("""DROP TABLE IF EXISTS txs""")
         self.cur.execute("""DROP TABLE IF EXISTS users""")
         self.cur.execute("""DROP TABLE IF EXISTS messages""")
-        self.conn.commit()
+        self.commit()
 
     def create_tables(self):
         # Blocks: contains height and a list of integer ids
@@ -53,7 +56,7 @@ class Database:
             )"""
         )
 
-        self.conn.commit()
+        self.commit()
 
     def get_all_tables(self):
         self.cur.execute("""SELECT name FROM sqlite_master WHERE type='table';""")
@@ -69,7 +72,7 @@ class Database:
             """INSERT INTO txs (tx) VALUES (?)""",
             (data,),
         )
-        self.conn.commit()
+        # self.conn.commit()
 
         return self.cur.lastrowid or -1
 
@@ -79,14 +82,14 @@ class Database:
             """INSERT INTO blocks (height, txs) VALUES (?, ?)""",
             (height, data),
         )
-        self.conn.commit()
+        # self.conn.commit()
 
     def insert_type_count(self, msg_type: str, count: int, height: int):
         self.cur.execute(
             """INSERT INTO messages (message, height, count) VALUES (?, ?, ?)""",
             (msg_type, height, count),
         )
-        self.conn.commit()
+        # self.conn.commit()
 
     def get_type_count_at_height(self, msg_type: str, height: int) -> int:
         self.cur.execute(
@@ -132,7 +135,7 @@ class Database:
             """INSERT INTO users (address, height, tx_id) VALUES (?, ?, ?)""",
             (address, height, tx_id),
         )
-        self.conn.commit()
+        # self.conn.commit()
 
     def get_block_txs(self, height: int) -> list[int] | None:
         self.cur.execute(

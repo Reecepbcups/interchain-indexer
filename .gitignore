@@ -3,3 +3,4 @@ latest_height.txt
 __pycache__/
 
 data.db
+*_error.txt

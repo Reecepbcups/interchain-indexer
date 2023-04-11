@@ -11,7 +11,6 @@ import time
 import httpx
 import rel
 import websocket
-
 from SQL import Database
 from util import (
     decode_txs,
@@ -33,7 +32,7 @@ WALLET_PREFIX = "juno1"
 WALLET_LENGTH = 43
 COSMOS_BINARY_FILE = "junod"
 
-MINIMUM_DOWNLOAD_HEIGHT = 6700000  # set to -1 if you want to ignore
+MINIMUM_DOWNLOAD_HEIGHT = 6000000  # set to -1 if you want to ignore
 
 current_dir = os.path.dirname(os.path.realpath(__file__))
 
@@ -105,6 +104,8 @@ def download_block(height: int):
 
     num_txs = [i for i in range(start_tx_id, unique_id + 1)]
     db.insert_block(height, num_txs)
+
+    db.commit()
 
     print(f"Block {height}: {len(num_txs)} txs")
 
