@@ -178,12 +178,12 @@ async def download_block(height: int):
 
     # db.get_block_txs(height) != None
     if is_json_file(height):
-        # if height % 100 == 0:
-        print(f"Block {height} is already downloaded")
+        if height % 100 == 0:
+            print(f"Block {height} is already downloaded")
         return
     
     async with httpx.AsyncClient() as client:
-        r = await client.get(f"{RPC_ARCHIVE}/block?height={height}")
+        r = await client.get(f"{RPC_ARCHIVE}/block?height={height}", timeout=60)
         if r.status_code != 200:
             print(f"Error: {r.status_code} @ height {height}")
             with open(os.path.join(errors, f"{height}.json"), "w") as f:
@@ -310,7 +310,12 @@ async def main():
                 tasks[block] = asyncio.create_task(download_block(block))                    
             
             print(f"Waiting to do # of task: {len(tasks)}")
-            await asyncio.gather(*tasks.values())
+            try:
+                await asyncio.gather(*tasks.values())
+            except Exception as e:
+                print(e)
+                print("Error in tasks")                
+                continue
 
             end_time = time.time()
             print(f"Finished #{len(tasks)} of tasks in {end_time - start_time} seconds")
