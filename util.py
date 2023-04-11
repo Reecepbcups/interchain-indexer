@@ -1,6 +1,8 @@
 import json
 import os
 
+import httpx
+
 current_dir = os.path.dirname(os.path.realpath(__file__))
 
 
@@ -26,8 +28,47 @@ def decode_txs(COSMOS_BINARY_FILE: str, block_txs: list[str]) -> list:
     return decoded_txs
 
 
+def get_sender(msg: dict, WALLET_PREFIX: str) -> str | None:
+    keys = ["sender", "delegator_address", "from_address", "grantee", "voter"]
+
+    for key in keys:
+        if key in msg.keys():
+            return msg[key]
+
+    # tries to find the sender in the msg even if the key is not found
+    for key, value in msg.items():
+        if (
+            isinstance(value, str)
+            and value.startswith(WALLET_PREFIX)
+            and len(value) == 43
+        ):
+            print(f"Found sender: {value} as {key}")
+            return value
+
+    return None
+
+
 def get_block_txs(block_data: dict) -> list:
     return block_data.get("block", {}).get("data", {}).get("txs", [])
+
+
+def get_latest_chain_height(RPC_ARCHIVE: str, latest_saved_height: int) -> int:
+    current_height = (
+        httpx.get(f"{RPC_ARCHIVE}/abci_info?")
+        .json()
+        .get("result", {})
+        .get("response", {})
+        .get("last_block_height", "-1")
+    )
+    print(f"Current Height: {current_height}")
+    if current_height == "-1":
+        print("Could not get current height. Exiting...")
+        return -1
+
+    difference = int(current_height) - latest_saved_height
+    print(f"Missing {difference:,} blocks")
+
+    return int(current_height)
 
 
 def get_block_events(block_data: dict) -> dict:

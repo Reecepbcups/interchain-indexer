@@ -11,6 +11,7 @@ class Database:
         self.cur.execute("""DROP TABLE IF EXISTS blocks""")
         self.cur.execute("""DROP TABLE IF EXISTS txs""")
         self.cur.execute("""DROP TABLE IF EXISTS users""")
+        self.cur.execute("""DROP TABLE IF EXISTS messages""")
         self.conn.commit()
 
     def create_tables(self):
@@ -21,7 +22,7 @@ class Database:
         # Create blocks table
         self.cur.execute(
             """CREATE TABLE IF NOT EXISTS blocks (
-                height integer,
+                height integer PRIMARY KEY not null,
                 txs text
             )"""
         )
@@ -38,12 +39,29 @@ class Database:
         self.cur.execute(
             """CREATE TABLE IF NOT EXISTS users (
                 address text,
-                height integer,
+                height integer not null,
                 tx_id integer
             )"""
         )
 
+        # create a message types table
+        self.cur.execute(
+            """CREATE TABLE IF NOT EXISTS messages (
+                message text not null,
+                height integer not null,
+                count integer not null
+            )"""
+        )
+
         self.conn.commit()
+
+    def get_all_tables(self):
+        self.cur.execute("""SELECT name FROM sqlite_master WHERE type='table';""")
+        return self.cur.fetchall()
+
+    def get_table_schema(self, table: str):
+        self.cur.execute(f"""PRAGMA table_info({table})""")
+        return self.cur.fetchall()
 
     def insert_tx(self, tx_data: dict) -> int:
         data = json.dumps(tx_data)
@@ -62,6 +80,35 @@ class Database:
             (height, data),
         )
         self.conn.commit()
+
+    def insert_type_count(self, msg_type: str, count: int, height: int):
+        self.cur.execute(
+            """INSERT INTO messages (message, height, count) VALUES (?, ?, ?)""",
+            (msg_type, height, count),
+        )
+        self.conn.commit()
+
+    def get_type_count_at_height(self, msg_type: str, height: int) -> int:
+        self.cur.execute(
+            """SELECT count FROM messages WHERE message=? AND height=?""",
+            (msg_type, height),
+        )
+        data = self.cur.fetchone()
+        if data is None:
+            return 0
+        return data[0]
+
+    def get_type_count_over_range(
+        self, msg_type: str, start: int, end: int
+    ) -> list[int]:
+        self.cur.execute(
+            """SELECT count FROM messages WHERE message=? AND height>=? AND height<=?""",
+            (msg_type, start, end),
+        )
+        data = self.cur.fetchall()
+        if data is None:
+            return []
+        return [x[0] for x in data]
 
     def insert_user(self, address: str, height: int, tx_id: int):
         self.cur.execute(

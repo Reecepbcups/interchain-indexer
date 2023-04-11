@@ -12,7 +12,13 @@ import rel
 import websocket
 
 from SQL import Database
-from util import decode_txs, get_block_txs, remove_useless_data
+from util import (
+    decode_txs,
+    get_block_txs,
+    get_latest_chain_height,
+    get_sender,
+    remove_useless_data,
+)
 
 # TODO: Save Txs & events to postgres?
 # maybe a redis cache as well so other people can subscribe to redis for events?
@@ -23,36 +29,17 @@ RPC_URL = f"ws://{RPC_IP}/websocket"
 RPC_ARCHIVE = "https://rpc-archive.junonetwork.io:443"
 
 WALLET_PREFIX = "juno1"
+WALLET_LENGTH = 43
 COSMOS_BINARY_FILE = "junod"
 
 current_dir = os.path.dirname(os.path.realpath(__file__))
-
-latest_height = -1
-
-
-def get_latest_chain_height() -> int:
-    current_height = (
-        httpx.get(f"{RPC_ARCHIVE}/abci_info?")
-        .json()
-        .get("result", {})
-        .get("response", {})
-        .get("last_block_height", "-1")
-    )
-    print(f"Current Height: {current_height}")
-    if current_height == "-1":
-        print("Could not get current height. Exiting...")
-        return -1
-
-    difference = int(current_height) - latest_height
-    print(f"Missing {difference:,} blocks")
-
-    return int(current_height)
-
 
 ignore = [
     "ibc.core.client.v1.MsgUpdateClient",
     "ibc.core.channel.v1.MsgAcknowledgement",
 ]
+
+latest_height = -1
 
 
 def download_block(height: int):
@@ -82,24 +69,27 @@ def download_block(height: int):
 
     start_tx_id = -1
     unique_id = -1
-    for tx in decoded_txs:
-        sender = tx.get("body", {}).get("messages", [{}])[0].get("sender", {})
 
-        if sender == {}:
-            sender = (
-                tx.get("body", {}).get("messages", [{}])[0].get("delegator_address", {})
-            )
+    msg_types: dict[str, int] = {}
+    for idx, tx in enumerate(decoded_txs):
+        messages = tx.get("body", {}).get("messages", [])
 
-        if sender == {}:
-            sender = tx.get("body", {}).get("messages", [{}])[0].get("from_address", {})
+        sender = get_sender(messages[0], WALLET_PREFIX)
 
-        # grantee
-        if sender == {}:
-            sender = tx.get("body", {}).get("messages", [{}])[0].get("grantee", {})
+        for msg in messages:
+            msg_type = msg.get("@type")
+            if msg_type in msg_types.keys():
+                msg_types[msg_type] += 1
+            else:
+                msg_types[msg_type] = 1
 
-        # voter
-        if sender == {}:
-            sender = tx.get("body", {}).get("messages", [{}])[0].get("voter", {})
+        # print(msg_types)
+
+        if sender == None:
+            # write error to file if there is no sender found (we need to add this type)
+            with open(os.path.join(current_dir, "no_sender_error.txt"), "a") as f:
+                f.write(str(tx) + "\n\n")
+            continue
 
         # if ignore is in the string of the tx, continue
         if any(x in str(tx) for x in ignore):
@@ -112,7 +102,12 @@ def download_block(height: int):
             start_tx_id = unique_id
 
         # insert unique_id for user
-        db.insert_user(sender, height, unique_id)
+        db.insert_user(str(sender), height, unique_id)
+
+    for mtype, count in msg_types.items():
+        db.insert_type_count(mtype, count, height)
+
+    count = db.get_type_count_at_height("/cosmwasm.wasm.v1.MsgExecuteContract", height)
 
     db.insert_block(height, [i for i in range(start_tx_id, unique_id + 1)])
 
@@ -180,28 +175,47 @@ if __name__ == "__main__":
     latest_height = db.get_latest_saved_block_height()
     print(f"Latest saved block height: {latest_height}")
 
-    if False and len(RPC_IP) > 0:
-        websocket.enableTrace(False)  # toggle to show or hide output
-        ws = websocket.WebSocketApp(
-            f"{RPC_URL}",
-            on_open=on_open,
-            on_message=on_message,
-            on_error=on_error,
-            on_close=on_close,
-        )
+    # tables = db.get_all_tables()
+    # print(tables)
+    # schema = db.get_table_schema("messages")
+    # print(schema)
 
-        ws.run_forever(
-            dispatcher=rel, reconnect=5
-        )  # Set dispatcher to automatic reconnection, 5 second reconnect delay if connection closed unexpectedly
-        rel.signal(2, rel.abort)  # Keyboard Interrupt
-        rel.dispatch()
-    else:
-        # while loop, every 6 seconds query the RPC for latest and download
-        pass
+    count = db.get_type_count_at_height("/cosmwasm.wasm.v1.MsgExecuteContract", 7781750)
+    print(count)
+
+    range_count = db.get_type_count_over_range(
+        "/cosmwasm.wasm.v1.MsgExecuteContract", 7781750, 7781755
+    )
+    print(sum(range_count))
+
+    exit(1)
+
+    # Download missing blocks before trying to subscribe / 6 second loop
+
+    # if False and len(RPC_IP) > 0:
+    #     websocket.enableTrace(False)  # toggle to show or hide output
+    #     ws = websocket.WebSocketApp(
+    #         f"{RPC_URL}",
+    #         on_open=on_open,
+    #         on_message=on_message,
+    #         on_error=on_error,
+    #         on_close=on_close,
+    #     )
+
+    #     ws.run_forever(
+    #         dispatcher=rel, reconnect=5
+    #     )  # Set dispatcher to automatic reconnection, 5 second reconnect delay if connection closed unexpectedly
+    #     rel.signal(2, rel.abort)  # Keyboard Interrupt
+    #     rel.dispatch()
+    # else:
+    #     # while loop, every 6 seconds query the RPC for latest and download. Try catch
+    #     pass
 
     if True:
-        for i in range(7781750, 7781900):
-            # latest_height = get_latest_chain_height()
+        for i in range(7781750, 7781755):
+            # latest_height = get_latest_chain_height(
+            #     RPC_ARCHIVE=RPC_ARCHIVE, latest_saved_height=latest_height
+            # )
             # download_block(latest_height)
             download_block(i)
 
