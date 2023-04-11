@@ -181,11 +181,6 @@ async def download_block(height: int):
         # if height % 100 == 0:
         print(f"Block {height} is already downloaded")
         return
-
-    # block_data = (
-    #     httpx.get(f"{RPC_ARCHIVE}/block?height={height}").json().get("result", {})
-    # )
-
     
     async with httpx.AsyncClient() as client:
         r = await client.get(f"{RPC_ARCHIVE}/block?height={height}")
@@ -201,7 +196,7 @@ async def download_block(height: int):
         block_data.get("result", {}).get("block", {}).get("data", {}).get("txs", [])
     )    
 
-    decoded_txs: list[dict] = await decode_txs(COSMOS_BINARY_FILE, block_txs)
+    decoded_txs: list[dict] = decode_txs(COSMOS_BINARY_FILE, block_txs)
 
     # print(block_data)
     # exit(1)
@@ -209,41 +204,6 @@ async def download_block(height: int):
 
     save_block_data_to_json(height, block_data)
     return block_data
-
-
-def on_message(ws, message):
-    msg = dict(json.loads(message))
-
-    if msg.get("result") == {}:
-        print("Subscribed to New Block...")
-        return
-
-    msg_height = (
-        msg.get("result", {})
-        .get("data", {})
-        .get("value", {})
-        .get("block", {})
-        .get("header", {})
-        .get("height")
-    )
-
-    download_block(msg_height)
-
-
-def on_error(ws, error):
-    print("error", error)
-
-
-def on_close(ws, close_status_code, close_msg):
-    print("### closed ###")
-
-
-def on_open(ws):
-    print("Opened connection")
-    ws.send(
-        '{"jsonrpc": "2.0", "method": "subscribe", "params": ["tm.event=\'NewBlock\'"], "id": 1}'
-    )
-    print("Sent subscribe request")
 
 
 def test_get_data():
@@ -270,18 +230,18 @@ def test_get_data():
     # count = db.get_type_count_at_height("/cosmwasm.wasm.v1.MsgExecuteContract", 7781750)
     # print(count)
 
-    total = db.get_total_blocks()
-    print("Total Blocks", total)
+    # total = db.get_total_blocks()
+    # print("Total Blocks", total)
 
-    init_height = 6_000_000
-    end_height = 6079585
+    # init_height = 6_000_000
+    # end_height = 6079585
 
-    range_count = db.get_type_count_over_range(
-        "/cosmwasm.wasm.v1.MsgExecuteContract", init_height, end_height
-    )
-    all_range = db.get_all_count_over_range(init_height, end_height)
-    print(sum(range_count))
-    print(sum(all_range))
+    # range_count = db.get_type_count_over_range(
+    #     "/cosmwasm.wasm.v1.MsgExecuteContract", init_height, end_height
+    # )
+    # all_range = db.get_all_count_over_range(init_height, end_height)
+    # print(sum(range_count))
+    # print(sum(all_range))
 
     # exit(1)
     pass
@@ -290,81 +250,72 @@ def test_get_data():
 async def main():
     global latest_height
 
-    if False and len(RPC_IP) > 0:
-        websocket.enableTrace(False)  # toggle to show or hide output
-        ws = websocket.WebSocketApp(
-            f"{RPC_URL}",
-            on_open=on_open,
-            on_message=on_message,
-            on_error=on_error,
-            on_close=on_close,
+    if False:
+        test_get_data()
+
+    # while loop, every 6 seconds query the RPC for latest and download. Try catch
+    while True:
+        # last_downloaded = db.get_latest_saved_block_height()
+
+        # last_downloaded = get_latest_json_height()
+        current_chain_height = get_latest_chain_height(
+            RPC_ARCHIVE=RPC_ARCHIVE
         )
+        # block_diff = latest_height - last_downloaded
 
-        ws.run_forever(
-            dispatcher=rel, reconnect=5
-        )  # Set dispatcher to automatic reconnection, 5 second reconnect delay if connection closed unexpectedly
-        rel.signal(2, rel.abort)  # Keyboard Interrupt
-        rel.dispatch()
-    else:
-        if False:
-            test_get_data()
+        # if block_diff > 0:
+        #     print(
+        #         f"Downloading blocks, latest height: {latest_height}. Behind by: {block_diff}"
+        #     )
 
-        # while loop, every 6 seconds query the RPC for latest and download. Try catch
-        while True:
-            # last_downloaded = db.get_latest_saved_block_height()
+        #     if MINIMUM_DOWNLOAD_HEIGHT > 0:
+        #         if last_downloaded < MINIMUM_DOWNLOAD_HEIGHT:
+        #             last_downloaded = MINIMUM_DOWNLOAD_HEIGHT
 
-            # last_downloaded = get_latest_json_height()
-            # latest_height = get_latest_chain_height(
-            #     RPC_ARCHIVE=RPC_ARCHIVE, latest_saved_height=latest_height
-            # )
-            # block_diff = latest_height - last_downloaded
+        #     last_downloaded = 6_000_000
+        #     latest_height = 6_000_100
 
-            # if block_diff > 0:
-            #     print(
-            #         f"Downloading blocks, latest height: {latest_height}. Behind by: {block_diff}"
-            #     )
+        #     # pre define size since it could be >1_000_000
+        #     # tasks = [None] * (block_diff + 1)
+        #     tasks = []
 
-            #     if MINIMUM_DOWNLOAD_HEIGHT > 0:
-            #         if last_downloaded < MINIMUM_DOWNLOAD_HEIGHT:
-            #             last_downloaded = MINIMUM_DOWNLOAD_HEIGHT
+        #     with multiprocessing.Pool(multiprocessing.cpu_count()) as pool:
+        #         # for i in range(last_downloaded - 1, latest_height + 1):
+        #         for i in range(last_downloaded - 1, latest_height + 1):
+        #             tasks.append(asyncio.create_task(download_block(i)))
 
-            #     last_downloaded = 6_000_000
-            #     latest_height = 6_000_100
+        #         print(f"Waiting to do task {len(tasks)}")
+        #         await asyncio.gather(*tasks)
 
-            #     # pre define size since it could be >1_000_000
-            #     # tasks = [None] * (block_diff + 1)
-            #     tasks = []
+        grouping = 100
 
-            #     with multiprocessing.Pool(multiprocessing.cpu_count()) as pool:
-            #         # for i in range(last_downloaded - 1, latest_height + 1):
-            #         for i in range(last_downloaded - 1, latest_height + 1):
-            #             tasks.append(asyncio.create_task(download_block(i)))
+        start = 6_700_000            
+        # ensure end is a multiple of grouping
+        end = current_chain_height - (current_chain_height % grouping) 
+        print(end)
 
-            #         print(f"Waiting to do task {len(tasks)}")
-            #         await asyncio.gather(*tasks)
+        difference = int(end) - start
+        print(f"Download Spread: {difference:,} blocks")      
+        # exit(1)     
 
-            start = 6_000_000
-            end = 6_001_000
 
-            grouping = 500
+        # Runs through groups for downloading from the RPC
+        for i in range((end - start) // grouping + 1):
+            tasks = {}
+            start_time = time.time()
+            for j in range(grouping):
+                # block index from the grouping its in
+                block = start + i * grouping + j
+                tasks[block] = asyncio.create_task(download_block(block))                    
+            
+            print(f"Waiting to do # of task: {len(tasks)}")
+            await asyncio.gather(*tasks.values())
 
-            # Runs through groups for downloading from the RPC
-            for i in range((end - start) // grouping + 1):
-                tasks = {}
-                start_time = time.time()
-                for j in range(grouping):
-                    # block index from the grouping its in
-                    block = start + i * grouping + j
-                    tasks[block] = asyncio.create_task(download_block(block))                    
-                
-                print(f"Waiting to do # of task: {len(tasks)}")
-                await asyncio.gather(*tasks.values())
+            end_time = time.time()
+            print(f"Finished #{len(tasks)} of tasks in {end_time - start_time} seconds")
 
-                end_time = time.time()
-                print(f"Finished #{len(tasks)} of tasks in {end_time - start_time} seconds")
-
-            print("Finished")  # do a sleep here in the future
-            exit(1)
+        print("Finished")  # do a sleep here in the future
+        exit(1)
 
 
 # from websocket import create_connection

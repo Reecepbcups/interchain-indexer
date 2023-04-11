@@ -66,7 +66,7 @@ def get_block_txs(block_data: dict) -> list:
     return block_data.get("block", {}).get("data", {}).get("txs", [])
 
 
-def get_latest_chain_height(RPC_ARCHIVE: str, latest_saved_height: int) -> int:
+def get_latest_chain_height(RPC_ARCHIVE: str) -> int:
     current_height = (
         httpx.get(f"{RPC_ARCHIVE}/abci_info?")
         .json()
@@ -77,10 +77,7 @@ def get_latest_chain_height(RPC_ARCHIVE: str, latest_saved_height: int) -> int:
     print(f"Current Height: {current_height}")
     if current_height == "-1":
         print("Could not get current height. Exiting...")
-        return -1
-
-    difference = int(current_height) - latest_saved_height
-    print(f"Missing {difference:,} blocks")
+        return -1    
 
     return int(current_height)
 
