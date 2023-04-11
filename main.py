@@ -33,6 +33,8 @@ WALLET_PREFIX = "juno1"
 WALLET_LENGTH = 43
 COSMOS_BINARY_FILE = "junod"
 
+MINIMUM_DOWNLOAD_HEIGHT = 6700000  # set to -1 if you want to ignore
+
 current_dir = os.path.dirname(os.path.realpath(__file__))
 
 ignore = [
@@ -166,10 +168,15 @@ def test_get_data():
     # count = db.get_type_count_at_height("/cosmwasm.wasm.v1.MsgExecuteContract", 7781750)
     # print(count)
 
+    total = db.get_total_blocks()
+    print("Total Blocks", total)
+
     range_count = db.get_type_count_over_range(
         "/cosmwasm.wasm.v1.MsgExecuteContract", 7781750, 7782188
     )
     all_range = db.get_all_count_over_range(7781750, 7782188)
+    print(sum(range_count))
+    print(sum(all_range))
 
     # exit(1)
     pass
@@ -202,7 +209,7 @@ if __name__ == "__main__":
         rel.signal(2, rel.abort)  # Keyboard Interrupt
         rel.dispatch()
     else:
-        if False:
+        if True:
             test_get_data()
 
         # while loop, every 6 seconds query the RPC for latest and download. Try catch
@@ -217,6 +224,11 @@ if __name__ == "__main__":
                 print(
                     f"Downloading blocks, latest height: {latest_height}. Behind by: {block_diff}"
                 )
+
+                if MINIMUM_DOWNLOAD_HEIGHT > 0:
+                    if last_downloaded < MINIMUM_DOWNLOAD_HEIGHT:
+                        last_downloaded = MINIMUM_DOWNLOAD_HEIGHT
+
                 # download 1 behind just to ensure we got it
                 for i in range(last_downloaded - 1, latest_height + 1):
                     download_block(i)

@@ -120,6 +120,13 @@ class Database:
             return []
         return [x[0] for x in data]
 
+    def get_total_blocks(self) -> int:
+        self.cur.execute("""SELECT COUNT(*) FROM blocks""")
+        data = self.cur.fetchone()
+        if data is None:
+            return 0
+        return data[0]
+
     def insert_user(self, address: str, height: int, tx_id: int):
         self.cur.execute(
             """INSERT INTO users (address, height, tx_id) VALUES (?, ?, ?)""",
