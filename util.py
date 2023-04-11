@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 
@@ -26,6 +27,27 @@ def decode_txs(COSMOS_BINARY_FILE: str, block_txs: list[str]) -> list:
             decoded_txs.append(tx)
 
     return decoded_txs
+
+from multiprocessing.dummy import Pool
+
+
+async def decode_txs_async(COSMOS_BINARY_FILE: str, block_txs: list[str]) -> list:
+    # tasks = []
+    # for txs in block_txs:
+    #     tasks.append(__run_decode(COSMOS_BINARY_FILE, txs))
+
+    # txs = await asyncio.gather(*tasks)
+
+    # return txs
+    outputs = []
+    with Pool(10) as p:
+        print("Starting async decode")
+        for output, error in p.imap(__run_decode, block_txs):
+            # print(output, error)
+            outputs.append(output)
+    
+
+    return outputs
 
 
 def get_sender(msg: dict, WALLET_PREFIX: str, VALOPER_PREFIX: str) -> str | None:

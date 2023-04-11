@@ -21,6 +21,7 @@ import websocket
 from SQL import Database
 from util import (
     decode_txs,
+    decode_txs_async,
     get_block_txs,
     get_latest_chain_height,
     get_sender,
@@ -194,9 +195,10 @@ async def download_block(height: int):
     block_data: dict = r.json()
     block_txs = (
         block_data.get("result", {}).get("block", {}).get("data", {}).get("txs", [])
-    )    
+    )        
 
     decoded_txs: list[dict] = decode_txs(COSMOS_BINARY_FILE, block_txs)
+    # decoded_txs: list[dict] = await decode_txs_async(COSMOS_BINARY_FILE, block_txs)
 
     # print(block_data)
     # exit(1)
