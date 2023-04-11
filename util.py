@@ -28,8 +28,17 @@ def decode_txs(COSMOS_BINARY_FILE: str, block_txs: list[str]) -> list:
     return decoded_txs
 
 
-def get_sender(msg: dict, WALLET_PREFIX: str) -> str | None:
-    keys = ["sender", "delegator_address", "from_address", "grantee", "voter", "signer", "depositor", "proposer"]
+def get_sender(msg: dict, WALLET_PREFIX: str, VALOPER_PREFIX: str) -> str | None:
+    keys = [
+        "sender",
+        "delegator_address",
+        "from_address",
+        "grantee",
+        "voter",
+        "signer",
+        "depositor",
+        "proposer",
+    ]
 
     for key in keys:
         if key in msg.keys():
@@ -39,7 +48,7 @@ def get_sender(msg: dict, WALLET_PREFIX: str) -> str | None:
     for key, value in msg.items():
         if (
             isinstance(value, str)
-            and value.startswith(WALLET_PREFIX)
+            and (value.startswith(WALLET_PREFIX) or value.startswith(VALOPER_PREFIX))
             and len(value) == 43
         ):
             with open(os.path.join(current_dir, "get_sender_foundkey.txt"), "a") as f:

@@ -36,6 +36,7 @@ RPC_URL = f"ws://{RPC_IP}/websocket"
 RPC_ARCHIVE = "https://rpc-archive.junonetwork.io:443"
 
 WALLET_PREFIX = "juno1"
+VALOPER_PREFIX = "junovaloper1"
 WALLET_LENGTH = 43
 COSMOS_BINARY_FILE = "junod"
 
@@ -62,8 +63,9 @@ os.makedirs(txs_dir, exist_ok=True)
 type_stats = os.path.join(data_dir, "type_stats")
 os.makedirs(type_stats, exist_ok=True)
 
-users = os.path.join(data_dir, "users")
-os.makedirs(users, exist_ok=True)
+# We will just do this after we index every Tx
+# users = os.path.join(data_dir, "users")
+# os.makedirs(users, exist_ok=True)
 
 errors = os.path.join(data_dir, "errors")
 os.makedirs(errors, exist_ok=True)
@@ -73,21 +75,10 @@ def is_json_file(height: int) -> bool:
     return os.path.exists(os.path.join(blocks, f"{height}.json"))
 
 
-def get_latest_tx_id() -> int:
-    files = os.listdir(txs_dir)
+import uuid
 
-    if len(files) == 0:
-        return 0
-
-    files.sort()
-
-    # which can be used
-    v = int(files[-1].split(".")[0]) + 1
-    print(f"Latest TX ID: {v}")
-    return v
-
-
-unique_id = get_latest_tx_id()
+# This will be a unique number in the future in the .db itself. For now using UUIDs for async download
+# unique_id = get_latest_tx_id()
 
 
 def get_latest_json_height() -> int:
@@ -103,7 +94,7 @@ def get_latest_json_height() -> int:
 
 
 def save_block_data_to_json(height: int, block_data: dict):
-    global unique_id
+    # global unique_id
     # We save to JSON here so later we can move it into the .db
 
     # Gets unique addresses from events (users/contracts interacted with during this time frame)
@@ -120,20 +111,21 @@ def save_block_data_to_json(height: int, block_data: dict):
 
     start_tx_id = -1
 
-    if unique_id == 0:
-        # get latest unique id from the txs directory
-        for file in os.listdir(txs_dir):
-            if file.endswith(".json"):
-                unique_id = int(file.split(".")[0])
+    # if unique_id == 0:
+    #     # get latest unique id from the txs directory
+    #     for file in os.listdir(txs_dir):
+    #         if file.endswith(".json"):
+    #             unique_id = int(file.split(".")[0])
 
-    print(unique_id)
+    # print(unique_id)
 
     msg_types: dict[str, int] = {}
     tx: dict
+    all_txs: list[int] = []  # ids
     for idx, tx in enumerate(decoded_txs):
         messages = tx.get("body", {}).get("messages", [])
 
-        sender = get_sender(messages[0], WALLET_PREFIX)
+        sender = get_sender(messages[0], WALLET_PREFIX, VALOPER_PREFIX)
 
         for msg in messages:
             msg_type = msg.get("@type")
@@ -148,24 +140,22 @@ def save_block_data_to_json(height: int, block_data: dict):
 
         # unique_id = db.insert_tx(tx)
 
+        unique_id = uuid.uuid4().int
         with open(os.path.join(txs_dir, f"{unique_id}.json"), "w") as f:
             f.write(json.dumps(tx))
-            unique_id = unique_id + 1
+            all_txs.append(unique_id)
 
         if start_tx_id == -1:
             start_tx_id = unique_id
 
-        # insert users tx id link
-        # db.insert_user(str(sender), height, unique_id)
-
-        user_data: dict[int, int] = {}
-        if os.path.exists(os.path.join(users, f"{sender}.json")):
-            with open(os.path.join(users, f"{sender}.json")) as f:
-                user_data = json.load(f)
-
-        user_data[height] = unique_id
-        with open(os.path.join(users, f"{sender}.json"), "w") as f:
-            json.dump(user_data, f)
+        # Do this after we index everything later
+        # user_data: dict[int, int] = {}
+        # if os.path.exists(os.path.join(users, f"{sender}.json")):
+        #     with open(os.path.join(users, f"{sender}.json")) as f:
+        #         user_data = json.load(f)
+        # user_data[height] = unique_id
+        # with open(os.path.join(users, f"{sender}.json"), "w") as f:
+        #     json.dump(user_data, f)
 
     # for mtype, count in msg_types.items():
     # db.insert_type_count(mtype, count, height)
@@ -174,7 +164,6 @@ def save_block_data_to_json(height: int, block_data: dict):
 
     # count = db.get_type_count_at_height("/cosmwasm.wasm.v1.MsgExecuteContract", height)
 
-    all_txs = [i for i in range(start_tx_id, unique_id + 1)]
     # db.insert_block(height, all_txs)
 
     with open(os.path.join(blocks, f"{height}.json"), "w") as f:
@@ -354,16 +343,26 @@ async def main():
             #         print(f"Waiting to do task {len(tasks)}")
             #         await asyncio.gather(*tasks)
 
-            tasks = []
-            for i in range(6_000_000 - 1, 6_000_100 + 1):
-                tasks.append(asyncio.create_task(download_block(i)))
+            start = 6_000_000
+            end = 6_001_000
 
-            print(f"Waiting to do task {len(tasks)}")
-            await asyncio.gather(*tasks)
+            grouping = 50
 
+            # Runs through groups of 100 for downloading from the indexer
+            for i in range((end - start) // grouping + 1):
+                tasks = {}
+                for j in range(grouping):
+                    # block index from the grouping its in
+                    block = start + i * grouping + j
+
+                    tasks[block] = asyncio.create_task(download_block(block))
+                    # print(f"Added task {block} to queue")
+
+                print(f"Doing #{len(tasks)} of tasks")
+                await asyncio.gather(*tasks.values())
+
+            print("Finished")  # do a sleep here in the future
             exit(1)
-
-            time.sleep(6)
 
 
 # from websocket import create_connection
@@ -376,6 +375,7 @@ if __name__ == "__main__":
     latest_height = get_latest_json_height()
     print(f"Latest saved block height: {latest_height}")
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     loop.run_until_complete(main())
     loop.close()
