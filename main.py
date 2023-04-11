@@ -287,10 +287,11 @@ async def main():
         #         print(f"Waiting to do task {len(tasks)}")
         #         await asyncio.gather(*tasks)
 
-        grouping = 100
+        grouping = 50
 
         start = 6_700_000            
         # ensure end is a multiple of grouping
+        # end = start + 500
         end = current_chain_height - (current_chain_height % grouping) 
         print(end)
 

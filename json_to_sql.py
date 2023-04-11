@@ -40,6 +40,16 @@ Loop through each, save into database. Save the Unique ID for said block
 Save this array to the blocks sqlite table at height
 """
 
+if False:
+    get_txs_from_sql = db.get_block_txs(6700122)
+    print(get_txs_from_sql)
+    if get_txs_from_sql is None or len(get_txs_from_sql) == 0:
+        print("No txs found")
+        exit(1)
+    get_tx = db.get_tx(get_txs_from_sql[0])
+    print(get_tx)
+    exit(1)
+
 
 def get_tx_from_json(tx_id: str | int) -> dict:
     with open(os.path.join(txs_dir, f"{tx_id}.json"), "r") as f:
@@ -95,21 +105,14 @@ for block_file in os.listdir(blocks):
     db.commit()
 
 
-if True:
-    get_txs_from_sql = db.get_block_txs(6000018)
-    print(get_txs_from_sql)
-    if get_txs_from_sql is None or len(get_txs_from_sql) == 0:
-        print("No txs found")
-        exit(1)
-    get_tx = db.get_tx(get_txs_from_sql[0])
-    print(get_tx)
+
 
 
 # We will delete the files later :)
 #     # delete the file
-#     if True:
-#         os.remove(os.path.join(blocks, block_file))
-#         os.remove(os.path.join(type_stats, block_file))
-#         # remove the tx files
-#         for tx in block_txs:
-#             os.remove(os.path.join(txs_dir, f"{tx}.json"))
+# if True:
+#     os.remove(os.path.join(blocks, block_file))
+#     os.remove(os.path.join(type_stats, block_file))
+#     # remove the tx files
+#     for tx in block_txs:
+#         os.remove(os.path.join(txs_dir, f"{tx}.json"))

@@ -84,6 +84,7 @@ class Database:
         )
         data = self.cur.fetchone()
         if data is not None:
+            print(f"Block {height} already in database")
             return
 
         data = json.dumps(txs)
