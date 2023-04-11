@@ -123,9 +123,7 @@ def save_block_data_to_json(height: int, block_data: dict):
     tx: dict
     all_txs: list[int] = []  # ids
     for idx, tx in enumerate(decoded_txs):
-        messages = tx.get("body", {}).get("messages", [])
-
-        sender = get_sender(messages[0], WALLET_PREFIX, VALOPER_PREFIX)
+        messages = tx.get("body", {}).get("messages", [])        
 
         for msg in messages:
             msg_type = msg.get("@type")
@@ -149,6 +147,7 @@ def save_block_data_to_json(height: int, block_data: dict):
             start_tx_id = unique_id
 
         # Do this after we index everything later
+        # sender = get_sender(height, messages[0], WALLET_PREFIX, VALOPER_PREFIX)
         # user_data: dict[int, int] = {}
         # if os.path.exists(os.path.join(users, f"{sender}.json")):
         #     with open(os.path.join(users, f"{sender}.json")) as f:
@@ -187,7 +186,7 @@ async def download_block(height: int):
     #     httpx.get(f"{RPC_ARCHIVE}/block?height={height}").json().get("result", {})
     # )
 
-    decoded_txs: list[dict] = []
+    
     async with httpx.AsyncClient() as client:
         r = await client.get(f"{RPC_ARCHIVE}/block?height={height}")
         if r.status_code != 200:
@@ -200,8 +199,9 @@ async def download_block(height: int):
     block_data: dict = r.json()
     block_txs = (
         block_data.get("result", {}).get("block", {}).get("data", {}).get("txs", [])
-    )
-    decoded_txs = decode_txs(COSMOS_BINARY_FILE, block_txs)
+    )    
+
+    decoded_txs: list[dict] = await decode_txs(COSMOS_BINARY_FILE, block_txs)
 
     # print(block_data)
     # exit(1)
@@ -346,20 +346,22 @@ async def main():
             start = 6_000_000
             end = 6_001_000
 
-            grouping = 50
+            grouping = 500
 
-            # Runs through groups of 100 for downloading from the indexer
+            # Runs through groups for downloading from the RPC
             for i in range((end - start) // grouping + 1):
                 tasks = {}
+                start_time = time.time()
                 for j in range(grouping):
                     # block index from the grouping its in
                     block = start + i * grouping + j
-
-                    tasks[block] = asyncio.create_task(download_block(block))
-                    # print(f"Added task {block} to queue")
-
-                print(f"Doing #{len(tasks)} of tasks")
+                    tasks[block] = asyncio.create_task(download_block(block))                    
+                
+                print(f"Waiting to do # of task: {len(tasks)}")
                 await asyncio.gather(*tasks.values())
+
+                end_time = time.time()
+                print(f"Finished #{len(tasks)} of tasks in {end_time - start_time} seconds")
 
             print("Finished")  # do a sleep here in the future
             exit(1)
@@ -367,9 +369,9 @@ async def main():
 
 # from websocket import create_connection
 if __name__ == "__main__":
-    db = Database(os.path.join(current_dir, "data.db"))
-    # db.drop_all()
-    db.create_tables()
+    # db = Database(os.path.join(current_dir, "data.db"))
+    # # db.drop_all()
+    # db.create_tables()
 
     # latest_height = db.get_latest_saved_block_height()
     latest_height = get_latest_json_height()
