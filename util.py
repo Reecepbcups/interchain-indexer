@@ -9,7 +9,7 @@ current_dir = os.path.dirname(os.path.realpath(__file__))
 def __run_decode(cosmos_binary: str, tx: str) -> dict:
     # check for max len tx (store code breaks this for CLI usage on linux)
     if len(tx) > 32766:
-        print("TX too long. Skipping...")
+        # print("TX too long. Skipping...")
         return {}
 
     res = os.popen(f"{cosmos_binary} tx decode {tx} --output json").read()
@@ -29,7 +29,7 @@ def decode_txs(COSMOS_BINARY_FILE: str, block_txs: list[str]) -> list:
 
 
 def get_sender(msg: dict, WALLET_PREFIX: str) -> str | None:
-    keys = ["sender", "delegator_address", "from_address", "grantee", "voter"]
+    keys = ["sender", "delegator_address", "from_address", "grantee", "voter", "signer"]
 
     for key in keys:
         if key in msg.keys():
@@ -42,8 +42,13 @@ def get_sender(msg: dict, WALLET_PREFIX: str) -> str | None:
             and value.startswith(WALLET_PREFIX)
             and len(value) == 43
         ):
-            print(f"Found sender: {value} as {key}")
+            with open(os.path.join(current_dir, "get_sender_foundkey.txt"), "a") as f:
+                f.write(f"Found sender: {value} as {key}" + " - " + str(msg) + "\n\n")
             return value
+
+    # write error to file if there is no sender found (we need to add this type)
+    with open(os.path.join(current_dir, "no_sender_error.txt"), "a") as f:
+        f.write(str(msg) + "\n\n")
 
     return None
 

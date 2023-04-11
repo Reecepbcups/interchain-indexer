@@ -110,6 +110,16 @@ class Database:
             return []
         return [x[0] for x in data]
 
+    def get_all_count_over_range(self, start: int, end: int) -> list[int]:
+        self.cur.execute(
+            """SELECT count FROM messages WHERE height>=? AND height<=?""",
+            (start, end),
+        )
+        data = self.cur.fetchall()
+        if data is None:
+            return []
+        return [x[0] for x in data]
+
     def insert_user(self, address: str, height: int, tx_id: int):
         self.cur.execute(
             """INSERT INTO users (address, height, tx_id) VALUES (?, ?, ?)""",

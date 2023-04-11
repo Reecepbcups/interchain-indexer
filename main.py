@@ -6,6 +6,7 @@ We subscribe to check when the latest block is updated, then we query it normall
 
 import json
 import os
+import time
 
 import httpx
 import rel
@@ -45,7 +46,8 @@ latest_height = -1
 def download_block(height: int):
     # Skip already downloaded height data
     if db.get_block_txs(height) != None:
-        print(f"Block {height} is already downloaded")
+        if height % 100 == 0:
+            print(f"Block {height} is already downloaded")
         return
 
     block_data = (
@@ -83,25 +85,15 @@ def download_block(height: int):
             else:
                 msg_types[msg_type] = 1
 
-        # print(msg_types)
-
-        if sender == None:
-            # write error to file if there is no sender found (we need to add this type)
-            with open(os.path.join(current_dir, "no_sender_error.txt"), "a") as f:
-                f.write(str(tx) + "\n\n")
-            continue
-
         # if ignore is in the string of the tx, continue
         if any(x in str(tx) for x in ignore):
             continue
 
         unique_id = db.insert_tx(tx)
-        print(f"Inserted tx {unique_id} with height {height}")
-
         if start_tx_id == -1:
             start_tx_id = unique_id
 
-        # insert unique_id for user
+        # insert users tx id link
         db.insert_user(str(sender), height, unique_id)
 
     for mtype, count in msg_types.items():
@@ -109,7 +101,10 @@ def download_block(height: int):
 
     count = db.get_type_count_at_height("/cosmwasm.wasm.v1.MsgExecuteContract", height)
 
-    db.insert_block(height, [i for i in range(start_tx_id, unique_id + 1)])
+    num_txs = [i for i in range(start_tx_id, unique_id + 1)]
+    db.insert_block(height, num_txs)
+
+    print(f"Block {height}: {len(num_txs)} txs")
 
 
 def on_message(ws, message):
@@ -148,22 +143,36 @@ def on_open(ws):
 
 
 def test_get_data():
-    # txs_in_block = db.get_block_txs(7781600)
+    # tables = db.get_all_tables()
+    # print(tables)
+    # schema = db.get_table_schema("messages")
+    # print(schema)
+
+    # txs_in_block = db.get_block_txs(7781750)
     # print(txs_in_block)
 
-    # using the database get tx with id of 29
     # tx = db.get_tx(txs_in_block[-1])
     # print(tx)
 
-    # get sender for a tx
     # sender_txs = db.get_user_tx_ids("juno195mm9y35sekrjk73anw2az9lv9xs5mztvyvamt")
     # print(sender_txs)
 
     # sender_txs = db.get_user_txs("juno195mm9y35sekrjk73anw2az9lv9xs5mztvyvamt")
     # print(sender_txs)
 
-    all_accs = db.get_all_accounts()
-    print(all_accs)
+    # # all_accs = db.get_all_accounts()
+    # # print(all_accs)
+
+    # count = db.get_type_count_at_height("/cosmwasm.wasm.v1.MsgExecuteContract", 7781750)
+    # print(count)
+
+    range_count = db.get_type_count_over_range(
+        "/cosmwasm.wasm.v1.MsgExecuteContract", 7781750, 7782188
+    )
+    all_range = db.get_all_count_over_range(7781750, 7782188)
+
+    # exit(1)
+    pass
 
 
 # from websocket import create_connection
@@ -175,50 +184,41 @@ if __name__ == "__main__":
     latest_height = db.get_latest_saved_block_height()
     print(f"Latest saved block height: {latest_height}")
 
-    # tables = db.get_all_tables()
-    # print(tables)
-    # schema = db.get_table_schema("messages")
-    # print(schema)
-
-    count = db.get_type_count_at_height("/cosmwasm.wasm.v1.MsgExecuteContract", 7781750)
-    print(count)
-
-    range_count = db.get_type_count_over_range(
-        "/cosmwasm.wasm.v1.MsgExecuteContract", 7781750, 7781755
-    )
-    print(sum(range_count))
-
-    exit(1)
-
     # Download missing blocks before trying to subscribe / 6 second loop
 
-    # if False and len(RPC_IP) > 0:
-    #     websocket.enableTrace(False)  # toggle to show or hide output
-    #     ws = websocket.WebSocketApp(
-    #         f"{RPC_URL}",
-    #         on_open=on_open,
-    #         on_message=on_message,
-    #         on_error=on_error,
-    #         on_close=on_close,
-    #     )
+    if False and len(RPC_IP) > 0:
+        websocket.enableTrace(False)  # toggle to show or hide output
+        ws = websocket.WebSocketApp(
+            f"{RPC_URL}",
+            on_open=on_open,
+            on_message=on_message,
+            on_error=on_error,
+            on_close=on_close,
+        )
 
-    #     ws.run_forever(
-    #         dispatcher=rel, reconnect=5
-    #     )  # Set dispatcher to automatic reconnection, 5 second reconnect delay if connection closed unexpectedly
-    #     rel.signal(2, rel.abort)  # Keyboard Interrupt
-    #     rel.dispatch()
-    # else:
-    #     # while loop, every 6 seconds query the RPC for latest and download. Try catch
-    #     pass
+        ws.run_forever(
+            dispatcher=rel, reconnect=5
+        )  # Set dispatcher to automatic reconnection, 5 second reconnect delay if connection closed unexpectedly
+        rel.signal(2, rel.abort)  # Keyboard Interrupt
+        rel.dispatch()
+    else:
+        if False:
+            test_get_data()
 
-    if True:
-        for i in range(7781750, 7781755):
-            # latest_height = get_latest_chain_height(
-            #     RPC_ARCHIVE=RPC_ARCHIVE, latest_saved_height=latest_height
-            # )
-            # download_block(latest_height)
-            download_block(i)
+        # while loop, every 6 seconds query the RPC for latest and download. Try catch
+        while True:
+            latest_height = get_latest_chain_height(
+                RPC_ARCHIVE=RPC_ARCHIVE, latest_saved_height=latest_height
+            )
 
-    # download_block(7781500)
+            last_downloaded = db.get_latest_saved_block_height()
+            block_diff = latest_height - last_downloaded
+            if block_diff > 0:
+                print(
+                    f"Downloading blocks, latest height: {latest_height}. Behind by: {block_diff}"
+                )
+                # download 1 behind just to ensure we got it
+                for i in range(last_downloaded - 1, latest_height + 1):
+                    download_block(i)
 
-    # test_get_data()
+            time.sleep(6)
