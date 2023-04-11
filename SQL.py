@@ -77,6 +77,15 @@ class Database:
         return self.cur.lastrowid or -1
 
     def insert_block(self, height: int, txs: list[int]):
+        # check if height is already in the database, if so return
+        self.cur.execute(
+            """SELECT height FROM blocks WHERE height=?""",
+            (height,),
+        )
+        data = self.cur.fetchone()
+        if data is not None:
+            return
+
         data = json.dumps(txs)
         self.cur.execute(
             """INSERT INTO blocks (height, txs) VALUES (?, ?)""",
