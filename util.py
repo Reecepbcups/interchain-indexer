@@ -14,25 +14,22 @@ def __run_decode(cosmos_binary: str, tx: str) -> dict:
     return json.loads(res)
 
 
-def decode_txs(COSMOS_BINARY_FILE: str, block_txs: dict) -> list:
+def decode_txs(COSMOS_BINARY_FILE: str, block_txs: list[str]) -> list:
     decoded_txs = []
 
     # iterate through each and convert to json with junod
-    for tx in block_txs:
-        tx = __run_decode(COSMOS_BINARY_FILE, tx)
+    for txs in block_txs:
+        tx = __run_decode(COSMOS_BINARY_FILE, txs)
         if isinstance(tx, dict) and len(tx) > 0:
             decoded_txs.append(tx)
 
     return decoded_txs
 
+
+
+
 def get_block_txs(block_data: dict) -> list:
-    return (
-        block_data.get("data", {})
-        .get("value", {})
-        .get("block", {})
-        .get("data", {})
-        .get("txs", [])
-    )
+    return block_data.get("block", {}).get("data", {}).get("txs", [])
 
 
 def get_block_events(block_data: dict) -> dict:
@@ -69,19 +66,19 @@ def get_unique_event_addresses(wallet_prefix: str, block_events: dict) -> list[s
 
 def remove_useless_data(block_data: dict) -> dict:
     # remove result_begin_block in the value section
-    del block_data["data"]["value"]["result_begin_block"]
-    del block_data["data"]["value"]["result_end_block"]
-    del block_data["data"]["value"]["block"]["last_commit"]["signatures"]
+    # del block_data["data"]["value"]["result_begin_block"]
+    # del block_data["data"]["value"]["result_end_block"]
+    del block_data["block"]["last_commit"]["signatures"]
 
-    # remove usless events for us
-    del block_data["events"]["commission.amount"]
-    del block_data["events"]["commission.validator"]
-    del block_data["events"]["rewards.amount"]
-    del block_data["events"]["rewards.validator"]
-    del block_data["events"]["coin_spent.amount"]
-    del block_data["events"]["coin_received.receiver"]
-    del block_data["events"]["proposer_reward.amount"]
-    del block_data["events"]["mint.amount"]
-    del block_data["events"]["coinbase.amount"]
+    # remove useless events for us
+    # del block_data["events"]["commission.amount"]
+    # del block_data["events"]["commission.validator"]
+    # del block_data["events"]["rewards.amount"]
+    # del block_data["events"]["rewards.validator"]
+    # del block_data["events"]["coin_spent.amount"]
+    # del block_data["events"]["coin_received.receiver"]
+    # del block_data["events"]["proposer_reward.amount"]
+    # del block_data["events"]["mint.amount"]
+    # del block_data["events"]["coinbase.amount"]
 
     return block_data
