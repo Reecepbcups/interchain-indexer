@@ -8,7 +8,9 @@ Flow:
 """
 # TODO: save Tx types to a table over time
 
+import asyncio
 import json
+import multiprocessing
 import os
 import time
 
@@ -48,22 +50,61 @@ ignore = [
 
 latest_height = -1
 
+data_dir = os.path.join(current_dir, "data")
+os.makedirs(data_dir, exist_ok=True)
 
-def download_block(height: int):
-    # Skip already downloaded height data
-    if db.get_block_txs(height) != None:
-        if height % 100 == 0:
-            print(f"Block {height} is already downloaded")
-        return
+blocks = os.path.join(data_dir, "blocks")
+os.makedirs(blocks, exist_ok=True)
 
-    block_data = (
-        httpx.get(f"{RPC_ARCHIVE}/block?height={height}").json().get("result", {})
-    )
+txs_dir = os.path.join(data_dir, "txs")
+os.makedirs(txs_dir, exist_ok=True)
 
-    # Gets block transactions, decodes them to JSON, and saves them to the block_data
-    block_txs = get_block_txs(block_data)
-    decoded_txs = decode_txs(COSMOS_BINARY_FILE, block_txs)
-    block_data["block"]["data"]["txs"] = decoded_txs
+type_stats = os.path.join(data_dir, "type_stats")
+os.makedirs(type_stats, exist_ok=True)
+
+users = os.path.join(data_dir, "users")
+os.makedirs(users, exist_ok=True)
+
+errors = os.path.join(data_dir, "errors")
+os.makedirs(errors, exist_ok=True)
+
+
+def is_json_file(height: int) -> bool:
+    return os.path.exists(os.path.join(blocks, f"{height}.json"))
+
+
+def get_latest_tx_id() -> int:
+    files = os.listdir(txs_dir)
+
+    if len(files) == 0:
+        return 0
+
+    files.sort()
+
+    # which can be used
+    v = int(files[-1].split(".")[0]) + 1
+    print(f"Latest TX ID: {v}")
+    return v
+
+
+unique_id = get_latest_tx_id()
+
+
+def get_latest_json_height() -> int:
+    files = os.listdir(blocks)
+
+    if len(files) == 0:
+        return 0
+
+    files.sort()
+    v = int(files[-1].split(".")[0])
+    print(f"Latest JSON height: {v}")
+    return v
+
+
+def save_block_data_to_json(height: int, block_data: dict):
+    global unique_id
+    # We save to JSON here so later we can move it into the .db
 
     # Gets unique addresses from events (users/contracts interacted with during this time frame)
     # Useful for cache solutions. So if a user does not have any changes here, then we can keep them cached longer
@@ -75,10 +116,20 @@ def download_block(height: int):
     # Removes useless events we do not need to cache which take up lots of space
     # updated_data = remove_useless_data(block_data)
 
+    decoded_txs = block_data["result"]["block"]["data"]["txs"]
+
     start_tx_id = -1
-    unique_id = -1
+
+    if unique_id == 0:
+        # get latest unique id from the txs directory
+        for file in os.listdir(txs_dir):
+            if file.endswith(".json"):
+                unique_id = int(file.split(".")[0])
+
+    print(unique_id)
 
     msg_types: dict[str, int] = {}
+    tx: dict
     for idx, tx in enumerate(decoded_txs):
         messages = tx.get("body", {}).get("messages", [])
 
@@ -95,24 +146,80 @@ def download_block(height: int):
         if any(x in str(tx) for x in ignore):
             continue
 
-        unique_id = db.insert_tx(tx)
+        # unique_id = db.insert_tx(tx)
+
+        with open(os.path.join(txs_dir, f"{unique_id}.json"), "w") as f:
+            f.write(json.dumps(tx))
+            unique_id = unique_id + 1
+
         if start_tx_id == -1:
             start_tx_id = unique_id
 
         # insert users tx id link
-        db.insert_user(str(sender), height, unique_id)
+        # db.insert_user(str(sender), height, unique_id)
 
-    for mtype, count in msg_types.items():
-        db.insert_type_count(mtype, count, height)
+        user_data: dict[int, int] = {}
+        if os.path.exists(os.path.join(users, f"{sender}.json")):
+            with open(os.path.join(users, f"{sender}.json")) as f:
+                user_data = json.load(f)
 
-    count = db.get_type_count_at_height("/cosmwasm.wasm.v1.MsgExecuteContract", height)
+        user_data[height] = unique_id
+        with open(os.path.join(users, f"{sender}.json"), "w") as f:
+            json.dump(user_data, f)
 
-    num_txs = [i for i in range(start_tx_id, unique_id + 1)]
-    db.insert_block(height, num_txs)
+    # for mtype, count in msg_types.items():
+    # db.insert_type_count(mtype, count, height)
+    with open(os.path.join(type_stats, f"{height}.json"), "w") as f:
+        json.dump(msg_types, f)
 
-    db.commit()
+    # count = db.get_type_count_at_height("/cosmwasm.wasm.v1.MsgExecuteContract", height)
 
-    print(f"Block {height}: {len(num_txs)} txs")
+    all_txs = [i for i in range(start_tx_id, unique_id + 1)]
+    # db.insert_block(height, all_txs)
+
+    with open(os.path.join(blocks, f"{height}.json"), "w") as f:
+        json.dump(all_txs, f)
+
+    # db.commit()
+
+    print(f"Block {height}: {len(all_txs)} txs")
+
+
+async def download_block(height: int):
+    # Skip already downloaded height data
+
+    # db.get_block_txs(height) != None
+    if is_json_file(height):
+        # if height % 100 == 0:
+        print(f"Block {height} is already downloaded")
+        return
+
+    # block_data = (
+    #     httpx.get(f"{RPC_ARCHIVE}/block?height={height}").json().get("result", {})
+    # )
+
+    decoded_txs: list[dict] = []
+    async with httpx.AsyncClient() as client:
+        r = await client.get(f"{RPC_ARCHIVE}/block?height={height}")
+        if r.status_code != 200:
+            print(f"Error: {r.status_code} @ height {height}")
+            with open(os.path.join(errors, f"{height}.json"), "w") as f:
+                f.write(r.text)
+            return
+
+    # Gets block transactions, decodes them to JSON, and saves them to the block_data
+    block_data: dict = r.json()
+    block_txs = (
+        block_data.get("result", {}).get("block", {}).get("data", {}).get("txs", [])
+    )
+    decoded_txs = decode_txs(COSMOS_BINARY_FILE, block_txs)
+
+    # print(block_data)
+    # exit(1)
+    block_data["result"]["block"]["data"]["txs"] = decoded_txs
+
+    save_block_data_to_json(height, block_data)
+    return block_data
 
 
 def on_message(ws, message):
@@ -191,16 +298,8 @@ def test_get_data():
     pass
 
 
-# from websocket import create_connection
-if __name__ == "__main__":
-    db = Database(os.path.join(current_dir, "data.db"))
-    # db.drop_all()
-    db.create_tables()
-
-    latest_height = db.get_latest_saved_block_height()
-    print(f"Latest saved block height: {latest_height}")
-
-    # Download missing blocks before trying to subscribe / 6 second loop
+async def main():
+    global latest_height
 
     if False and len(RPC_IP) > 0:
         websocket.enableTrace(False)  # toggle to show or hide output
@@ -223,23 +322,60 @@ if __name__ == "__main__":
 
         # while loop, every 6 seconds query the RPC for latest and download. Try catch
         while True:
-            latest_height = get_latest_chain_height(
-                RPC_ARCHIVE=RPC_ARCHIVE, latest_saved_height=latest_height
-            )
+            # last_downloaded = db.get_latest_saved_block_height()
 
-            last_downloaded = db.get_latest_saved_block_height()
-            block_diff = latest_height - last_downloaded
-            if block_diff > 0:
-                print(
-                    f"Downloading blocks, latest height: {latest_height}. Behind by: {block_diff}"
-                )
+            # last_downloaded = get_latest_json_height()
+            # latest_height = get_latest_chain_height(
+            #     RPC_ARCHIVE=RPC_ARCHIVE, latest_saved_height=latest_height
+            # )
+            # block_diff = latest_height - last_downloaded
 
-                if MINIMUM_DOWNLOAD_HEIGHT > 0:
-                    if last_downloaded < MINIMUM_DOWNLOAD_HEIGHT:
-                        last_downloaded = MINIMUM_DOWNLOAD_HEIGHT
+            # if block_diff > 0:
+            #     print(
+            #         f"Downloading blocks, latest height: {latest_height}. Behind by: {block_diff}"
+            #     )
 
-                # download 1 behind just to ensure we got it
-                for i in range(last_downloaded - 1, latest_height + 1):
-                    download_block(i)
+            #     if MINIMUM_DOWNLOAD_HEIGHT > 0:
+            #         if last_downloaded < MINIMUM_DOWNLOAD_HEIGHT:
+            #             last_downloaded = MINIMUM_DOWNLOAD_HEIGHT
+
+            #     last_downloaded = 6_000_000
+            #     latest_height = 6_000_100
+
+            #     # pre define size since it could be >1_000_000
+            #     # tasks = [None] * (block_diff + 1)
+            #     tasks = []
+
+            #     with multiprocessing.Pool(multiprocessing.cpu_count()) as pool:
+            #         # for i in range(last_downloaded - 1, latest_height + 1):
+            #         for i in range(last_downloaded - 1, latest_height + 1):
+            #             tasks.append(asyncio.create_task(download_block(i)))
+
+            #         print(f"Waiting to do task {len(tasks)}")
+            #         await asyncio.gather(*tasks)
+
+            tasks = []
+            for i in range(6_000_000 - 1, 6_000_100 + 1):
+                tasks.append(asyncio.create_task(download_block(i)))
+
+            print(f"Waiting to do task {len(tasks)}")
+            await asyncio.gather(*tasks)
+
+            exit(1)
 
             time.sleep(6)
+
+
+# from websocket import create_connection
+if __name__ == "__main__":
+    db = Database(os.path.join(current_dir, "data.db"))
+    # db.drop_all()
+    db.create_tables()
+
+    # latest_height = db.get_latest_saved_block_height()
+    latest_height = get_latest_json_height()
+    print(f"Latest saved block height: {latest_height}")
+
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(main())
+    loop.close()
