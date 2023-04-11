@@ -26,8 +26,6 @@ def decode_txs(COSMOS_BINARY_FILE: str, block_txs: list[str]) -> list:
     return decoded_txs
 
 
-
-
 def get_block_txs(block_data: dict) -> list:
     return block_data.get("block", {}).get("data", {}).get("txs", [])
 
@@ -41,11 +39,6 @@ def get_block_height(block_data: dict) -> int:
     print(f"Block Height: {height}")
 
     return height
-
-
-def update_latest_height(latest_height_file: str, height: int) -> None:
-    with open(latest_height_file, "w") as f:
-        f.write(str(height))
 
 
 def get_unique_event_addresses(wallet_prefix: str, block_events: dict) -> list[str]:

@@ -70,15 +70,22 @@ class Database:
         )
         self.conn.commit()
 
-    def get_block_txs(self, height: int) -> list[int]:
+    def get_block_txs(self, height: int) -> list[int] | None:
         self.cur.execute(
             """SELECT txs FROM blocks WHERE height=?""",
             (height,),
         )
         data = self.cur.fetchone()
         if data is None:
-            return []
+            return None
         return json.loads(data[0])
+
+    def get_latest_saved_block_height(self) -> int:
+        self.cur.execute("""SELECT height FROM blocks ORDER BY height DESC LIMIT 1""")
+        data = self.cur.fetchone()
+        if data is None:
+            return -1
+        return data[0]
 
     def get_tx(self, tx_id: int) -> dict:
         self.cur.execute(
@@ -91,25 +98,31 @@ class Database:
         return json.loads(data[0])
 
     def get_user_tx_ids(self, address: str) -> list[int]:
-        # get from users
+        # get all Tx ids for a given address
         self.cur.execute(
             """SELECT tx_id FROM users WHERE address=?""",
             (address,),
         )
-        data = self.cur.fetchone()  # (14,)
+        data = self.cur.fetchall()
         if data is None:
             return []
 
-        if isinstance(data[0], int):
-            return [data[0]]
-
-        return list(data[0])
+        return [tx_id[0] for tx_id in data]
 
     def get_user_txs(self, address: str) -> dict:
         tx_ids = self.get_user_tx_ids(address)
         txs = {}
         for tx_id in tx_ids:
             tx = self.get_tx(tx_id)
-            height = tx.get("height")
-            txs[height] = tx
+            txs[tx_id] = tx
         return txs
+
+    def get_all_accounts(self) -> list[str]:
+        # return all accounts and the len of txs they have
+        self.cur.execute(
+            """SELECT address, COUNT(tx_id) FROM users GROUP BY address""",
+        )
+        data = self.cur.fetchall()
+        if data is None:
+            return []
+        return data

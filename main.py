@@ -2,6 +2,8 @@
 We subscribe to check when the latest block is updated, then we query it normally via the RPC & save it
 """
 
+# TODO: save Tx types to a table over time
+
 import json
 import os
 
@@ -10,7 +12,7 @@ import rel
 import websocket
 
 from SQL import Database
-from util import decode_txs, get_block_txs, remove_useless_data, update_latest_height
+from util import decode_txs, get_block_txs, remove_useless_data
 
 # TODO: Save Txs & events to postgres?
 # maybe a redis cache as well so other people can subscribe to redis for events?
@@ -24,22 +26,8 @@ WALLET_PREFIX = "juno1"
 COSMOS_BINARY_FILE = "junod"
 
 current_dir = os.path.dirname(os.path.realpath(__file__))
-# blocks = os.path.join(current_dir, "blocks")
-# user_txs = os.path.join(current_dir, "users")
-# txs_folder = os.path.join(current_dir, "txs")
 
-# os.makedirs(blocks, exist_ok=True)
-# os.makedirs(user_txs, exist_ok=True)
-# os.makedirs(txs_folder, exist_ok=True)
-
-
-# TODO: get current height. If there is a difference, then we need to query the RPC for the missing blocks.
-latest_height_file = os.path.join(current_dir, "latest_height.txt")
 latest_height = -1
-if os.path.exists(latest_height_file):
-    with open(latest_height_file, "r") as f:
-        latest_height = int(f.read())
-print(f"Latest Height: {latest_height}")
 
 
 def get_latest_chain_height() -> int:
@@ -61,8 +49,6 @@ def get_latest_chain_height() -> int:
     return int(current_height)
 
 
-unique_tx_id = 0
-
 ignore = [
     "ibc.core.client.v1.MsgUpdateClient",
     "ibc.core.channel.v1.MsgAcknowledgement",
@@ -70,7 +56,10 @@ ignore = [
 
 
 def download_block(height: int):
-    global unique_tx_id
+    # Skip already downloaded height data
+    if db.get_block_txs(height) != None:
+        print(f"Block {height} is already downloaded")
+        return
 
     block_data = (
         httpx.get(f"{RPC_ARCHIVE}/block?height={height}").json().get("result", {})
@@ -89,12 +78,7 @@ def download_block(height: int):
     # block_data["events"]["all_unique_event_addresses"] = list(unique_event_addresses)
 
     # Removes useless events we do not need to cache which take up lots of space
-    updated_data = remove_useless_data(block_data)
-
-    # Saves data to a file
-    # TODO: Replace with SQL
-    # with open(os.path.join(blocks, f"{height}.json"), "w") as f:
-    #     f.write(json.dumps(updated_data))
+    # updated_data = remove_useless_data(block_data)
 
     start_tx_id = -1
     unique_id = -1
@@ -121,21 +105,6 @@ def download_block(height: int):
         if any(x in str(tx) for x in ignore):
             continue
 
-        # save tx to the txs folder with a unique id of unique_tx_id
-        # with open(os.path.join(txs_folder, f"{unique_tx_id}.json"), "w") as f:
-        #     f.write(json.dumps(tx))
-
-        # file = f"{sender}.json"
-        # txs = {}
-        # if os.path.exists(os.path.join(user_txs, file)):
-        #     with open(os.path.join(user_txs, file), "r") as f:
-        #         txs = json.loads(f.read())
-
-        # append new tx with height as key
-        # txs[height] = unique_tx_id
-
-        # with open(os.path.join(user_txs, file), "w") as f:
-        #     f.write(json.dumps(txs))
         unique_id = db.insert_tx(tx)
         print(f"Inserted tx {unique_id} with height {height}")
 
@@ -144,9 +113,6 @@ def download_block(height: int):
 
         # insert unique_id for user
         db.insert_user(sender, height, unique_id)
-
-    # Get height & save latest to file since we dumped it now
-    update_latest_height(latest_height_file, height)
 
     db.insert_block(height, [i for i in range(start_tx_id, unique_id + 1)])
 
@@ -187,19 +153,22 @@ def on_open(ws):
 
 
 def test_get_data():
-    txs_in_block = db.get_block_txs(7781608)
-    print(txs_in_block)
+    # txs_in_block = db.get_block_txs(7781600)
+    # print(txs_in_block)
 
     # using the database get tx with id of 29
-    tx = db.get_tx(txs_in_block[-1])
-    print(tx)
+    # tx = db.get_tx(txs_in_block[-1])
+    # print(tx)
 
     # get sender for a tx
-    sender_txs = db.get_user_tx_ids("juno15aay8perht035ugje30r3k49ce8rrz66ld5myp")
-    print(sender_txs)
+    # sender_txs = db.get_user_tx_ids("juno195mm9y35sekrjk73anw2az9lv9xs5mztvyvamt")
+    # print(sender_txs)
 
-    sender_txs = db.get_user_txs("juno15aay8perht035ugje30r3k49ce8rrz66ld5myp")
-    print(sender_txs)
+    # sender_txs = db.get_user_txs("juno195mm9y35sekrjk73anw2az9lv9xs5mztvyvamt")
+    # print(sender_txs)
+
+    all_accs = db.get_all_accounts()
+    print(all_accs)
 
 
 # from websocket import create_connection
@@ -207,6 +176,9 @@ if __name__ == "__main__":
     db = Database("data.db")
     # db.drop_all()
     db.create_tables()
+
+    latest_height = db.get_latest_saved_block_height()
+    print(f"Latest saved block height: {latest_height}")
 
     if False and len(RPC_IP) > 0:
         websocket.enableTrace(False)  # toggle to show or hide output
@@ -227,10 +199,12 @@ if __name__ == "__main__":
         # while loop, every 6 seconds query the RPC for latest and download
         pass
 
-    if False:
-        for i in range(7781600, 7781610):
+    if True:
+        for i in range(7781750, 7781900):
             # latest_height = get_latest_chain_height()
             # download_block(latest_height)
             download_block(i)
 
-    test_get_data()
+    # download_block(7781500)
+
+    # test_get_data()
