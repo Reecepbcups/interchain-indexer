@@ -39,7 +39,16 @@ RPC_ARCHIVE = "https://rpc-archive.junonetwork.io:443"
 WALLET_PREFIX = "juno1"
 VALOPER_PREFIX = "junovaloper1"
 WALLET_LENGTH = 43
-COSMOS_BINARY_FILE = "junod"
+
+# junod works as well, this is just a lightweight decoder of it.
+COSMOS_BINARY_FILE = "juno-decode" # https://github.com/Reecepbcups/juno-decoder
+try:
+    res = os.popen(f"{COSMOS_BINARY_FILE}").read()
+    # print(res)
+except Exception as e:
+    print(f"Please install {COSMOS_BINARY_FILE} to your path or ~/go/bin/")
+    exit(1)
+
 
 MINIMUM_DOWNLOAD_HEIGHT = 6000000  # set to -1 if you want to ignore
 
@@ -291,7 +300,7 @@ async def main():
 
         grouping = 50
 
-        start = 6_700_000            
+        start = 7_124_400 # original 6_700_000     
         # ensure end is a multiple of grouping
         # end = start + 500
         end = current_chain_height - (current_chain_height % grouping) 
