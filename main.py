@@ -13,20 +13,19 @@ import json
 import multiprocessing
 import os
 import time
+import uuid
 
 import httpx
-import rel
-import websocket
 
 from SQL import Database
-from util import (
-    decode_txs,
-    decode_txs_async,
+from util import (  # decode_txs,; decode_txs_async,
     get_block_txs,
     get_latest_chain_height,
     get_sender,
     remove_useless_data,
 )
+
+CPU_COUNT = multiprocessing.cpu_count()
 
 # TODO: Save Txs & events to postgres?
 # maybe a redis cache as well so other people can subscribe to redis for events?
@@ -41,7 +40,7 @@ VALOPER_PREFIX = "junovaloper1"
 WALLET_LENGTH = 43
 
 # junod works as well, this is just a lightweight decoder of it.
-COSMOS_BINARY_FILE = "juno-decode" # https://github.com/Reecepbcups/juno-decoder
+COSMOS_BINARY_FILE = "juno-decode"  # https://github.com/Reecepbcups/juno-decoder
 try:
     res = os.popen(f"{COSMOS_BINARY_FILE}").read()
     # print(res)
@@ -50,7 +49,7 @@ except Exception as e:
     exit(1)
 
 
-MINIMUM_DOWNLOAD_HEIGHT = 6000000  # set to -1 if you want to ignore
+# MINIMUM_DOWNLOAD_HEIGHT = 6000000  # set to -1 if you want to ignore
 
 current_dir = os.path.dirname(os.path.realpath(__file__))
 
@@ -84,8 +83,6 @@ os.makedirs(errors, exist_ok=True)
 def is_json_file(height: int) -> bool:
     return os.path.exists(os.path.join(blocks, f"{height}.json"))
 
-
-import uuid
 
 # This will be a unique number in the future in the .db itself. For now using UUIDs for async download
 # unique_id = get_latest_tx_id()
@@ -133,7 +130,7 @@ def save_block_data_to_json(height: int, block_data: dict):
     tx: dict
     all_txs: list[int] = []  # ids
     for idx, tx in enumerate(decoded_txs):
-        messages = tx.get("body", {}).get("messages", [])        
+        messages = tx.get("body", {}).get("messages", [])
 
         for msg in messages:
             msg_type = msg.get("@type")
@@ -183,7 +180,18 @@ def save_block_data_to_json(height: int, block_data: dict):
     print(f"Block {height}: {len(all_txs)} txs")
 
 
-async def download_block(height: int):
+def run_decode_single_async(tx: str) -> dict:
+    # We run in a pool for better performance
+    # check for max len tx (store code breaks this for CLI usage on linux)
+    if len(tx) > 32766:
+        # print("TX too long. Skipping...")
+        return {}
+
+    res = os.popen(f"{COSMOS_BINARY_FILE} tx decode {tx} --output json").read()
+    return json.loads(res)
+
+
+async def download_block(pool, height: int):
     # Skip already downloaded height data
 
     # db.get_block_txs(height) != None
@@ -191,7 +199,7 @@ async def download_block(height: int):
         if height % 100 == 0:
             print(f"Block {height} is already downloaded")
         return
-    
+
     async with httpx.AsyncClient() as client:
         r = await client.get(f"{RPC_ARCHIVE}/block?height={height}", timeout=60)
         if r.status_code != 200:
@@ -204,10 +212,12 @@ async def download_block(height: int):
     block_data: dict = r.json()
     block_txs = (
         block_data.get("result", {}).get("block", {}).get("data", {}).get("txs", [])
-    )        
+    )
 
-    decoded_txs: list[dict] = decode_txs(COSMOS_BINARY_FILE, block_txs)
-    # decoded_txs: list[dict] = await decode_txs_async(COSMOS_BINARY_FILE, block_txs)
+    # decoded_txs: list[dict] = decode_txs(COSMOS_BINARY_FILE, block_txs)
+    decoded_txs: list[dict] = []
+
+    decoded_txs = pool.map(run_decode_single_async, block_txs)
 
     # print(block_data)
     # exit(1)
@@ -269,9 +279,7 @@ async def main():
         # last_downloaded = db.get_latest_saved_block_height()
 
         # last_downloaded = get_latest_json_height()
-        current_chain_height = get_latest_chain_height(
-            RPC_ARCHIVE=RPC_ARCHIVE
-        )
+        current_chain_height = get_latest_chain_height(RPC_ARCHIVE=RPC_ARCHIVE)
         # block_diff = latest_height - last_downloaded
 
         # if block_diff > 0:
@@ -300,39 +308,41 @@ async def main():
 
         grouping = 50
 
-        start = 7_124_400 # original 6_700_000     
+        start = 7_124_400  # original 6_700_000
         # ensure end is a multiple of grouping
         # end = start + 500
-        end = current_chain_height - (current_chain_height % grouping) 
+        end = current_chain_height - (current_chain_height % grouping)
         print(end)
 
         difference = int(end) - start
-        print(f"Download Spread: {difference:,} blocks")      
-        # exit(1)     
-
+        print(f"Download Spread: {difference:,} blocks")
+        # exit(1)
 
         # Runs through groups for downloading from the RPC
-        for i in range((end - start) // grouping + 1):
-            tasks = {}
-            start_time = time.time()
-            for j in range(grouping):
-                # block index from the grouping its in
-                block = start + i * grouping + j
-                tasks[block] = asyncio.create_task(download_block(block))                    
-            
-            print(f"Waiting to do # of task: {len(tasks)}")
-            try:
-                await asyncio.gather(*tasks.values())
-            except Exception as e:
-                print(e)
-                print("Error in tasks")                
-                continue
+        with multiprocessing.Pool(CPU_COUNT) as pool:
+            for i in range((end - start) // grouping + 1):
+                tasks = {}
+                start_time = time.time()
+                for j in range(grouping):
+                    # block index from the grouping its in
+                    block = start + i * grouping + j
+                    tasks[block] = asyncio.create_task(download_block(pool, block))
 
-            end_time = time.time()
-            print(f"Finished #{len(tasks)} of tasks in {end_time - start_time} seconds")
+                print(f"Waiting to do # of blocks: {len(tasks)}")
+                try:
+                    await asyncio.gather(*tasks.values())
+                except Exception as e:
+                    print(e)
+                    print("Error in tasks")
+                    continue
 
-        print("Finished")  # do a sleep here in the future
-        exit(1)
+                end_time = time.time()
+                print(
+                    f"Finished #{len(tasks)} of tasks in {end_time - start_time} seconds"
+                )
+
+            print("Finished")  # do a sleep here in the future
+            exit(1)
 
 
 # from websocket import create_connection

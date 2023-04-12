@@ -7,47 +7,26 @@ import httpx
 current_dir = os.path.dirname(os.path.realpath(__file__))
 
 
-def __run_decode(cosmos_binary: str, tx: str) -> dict:
-    # check for max len tx (store code breaks this for CLI usage on linux)
-    if len(tx) > 32766:
-        # print("TX too long. Skipping...")
-        return {}
+# def __run_decode(cosmos_binary: str, tx: str) -> dict:
+#     # check for max len tx (store code breaks this for CLI usage on linux)
+#     if len(tx) > 32766:
+#         # print("TX too long. Skipping...")
+#         return {}
 
-    res = os.popen(f"{cosmos_binary} tx decode {tx} --output json").read()
-    return json.loads(res)
-
-
-def decode_txs(COSMOS_BINARY_FILE: str, block_txs: list[str]) -> list:
-    decoded_txs = []
-
-    # iterate through each and convert to json with junod
-    for txs in block_txs:
-        tx = __run_decode(COSMOS_BINARY_FILE, txs)
-        if isinstance(tx, dict) and len(tx) > 0:
-            decoded_txs.append(tx)
-
-    return decoded_txs
-
-from multiprocessing.dummy import Pool
+#     res = os.popen(f"{cosmos_binary} tx decode {tx} --output json").read()
+#     return json.loads(res)
 
 
-async def decode_txs_async(COSMOS_BINARY_FILE: str, block_txs: list[str]) -> list:
-    # tasks = []
-    # for txs in block_txs:
-    #     tasks.append(__run_decode(COSMOS_BINARY_FILE, txs))
+# def decode_txs(COSMOS_BINARY_FILE: str, block_txs: list[str]) -> list:
+#     decoded_txs = []
 
-    # txs = await asyncio.gather(*tasks)
+#     # iterate through each and convert to json with junod
+#     for txs in block_txs:
+#         tx = __run_decode(COSMOS_BINARY_FILE, txs)
+#         if isinstance(tx, dict) and len(tx) > 0:
+#             decoded_txs.append(tx)
 
-    # return txs
-    outputs = []
-    with Pool(10) as p:
-        print("Starting async decode")
-        for output, error in p.imap(__run_decode, block_txs):
-            # print(output, error)
-            outputs.append(output)
-    
-
-    return outputs
+#     return decoded_txs
 
 
 def get_sender(msg: dict, WALLET_PREFIX: str, VALOPER_PREFIX: str) -> str | None:
@@ -99,7 +78,7 @@ def get_latest_chain_height(RPC_ARCHIVE: str) -> int:
     print(f"Current Height: {current_height}")
     if current_height == "-1":
         print("Could not get current height. Exiting...")
-        return -1    
+        return -1
 
     return int(current_height)
 
