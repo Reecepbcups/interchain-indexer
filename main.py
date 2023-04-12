@@ -308,7 +308,7 @@ async def main():
 
         grouping = 100
 
-        start = 7_124_400  # original 6_700_000
+        start = 7_185_400  # original 6_700_000
         # ensure end is a multiple of grouping
         # end = start + 500
         end = current_chain_height - (current_chain_height % grouping)

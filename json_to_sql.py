@@ -3,8 +3,7 @@ import os
 
 from main import blocks, current_dir, data_dir, txs_dir, type_stats
 from SQL import Database
-from util import (
-    decode_txs,
+from util import (  # decode_txs,
     get_block_txs,
     get_latest_chain_height,
     get_sender,
@@ -40,8 +39,11 @@ Loop through each, save into database. Save the Unique ID for said block
 Save this array to the blocks sqlite table at height
 """
 
-if False:
-    get_txs_from_sql = db.get_block_txs(6700122)
+if True:
+    print(db.get_total_blocks())
+    exit(1)
+
+    get_txs_from_sql = db.get_block_txs(7100_002)
     print(get_txs_from_sql)
     if get_txs_from_sql is None or len(get_txs_from_sql) == 0:
         print("No txs found")
@@ -76,8 +78,8 @@ def get_tx_from_json(tx_id: str | int) -> dict:
 # print(users_txs)
 # exit(1)
 
-for block_file in os.listdir(blocks):
-    height = int(block_file.replace(".json", ""))
+for idx, block_file in enumerate(os.listdir(blocks)):
+    height = int(block_file.replace(".json", ""))    
 
     # Get blocks Temp Txs
     with open(os.path.join(blocks, block_file), "r") as f:
@@ -93,7 +95,11 @@ for block_file in os.listdir(blocks):
             txs_ids.append(unique_id)
 
     # insert the block into the database
-    print("height", height)
+    # print("height", height)
+    
+    if idx % 10_000 == 0:
+        print("Block", height)
+
     db.insert_block(height, txs_ids)
 
     # Msg Types
