@@ -31,6 +31,9 @@ class Database:
         )
 
         # Create txs table
+        # ! NOTE: Should add what type of tx it is here as well. Ex: /cosmwasm.wasm.v1.MsgExecuteContract
+        # So it will be easier to query for specific types of txs in a range?
+        # maybe also add the height here as well?
         self.cur.execute(
             """CREATE TABLE IF NOT EXISTS txs (
                 id integer PRIMARY KEY,
@@ -101,6 +104,13 @@ class Database:
         )
         # self.conn.commit()
 
+    def insert_user(self, address: str, height: int, tx_id: int):
+        self.cur.execute(
+            """INSERT INTO users (address, height, tx_id) VALUES (?, ?, ?)""",
+            (address, height, tx_id),
+        )
+        # self.conn.commit()
+
     def get_type_count_at_height(self, msg_type: str, height: int) -> int:
         self.cur.execute(
             """SELECT count FROM messages WHERE message=? AND height=?""",
@@ -114,6 +124,12 @@ class Database:
     def get_type_count_over_range(
         self, msg_type: str, start: int, end: int
     ) -> list[int]:
+        '''
+        Returns a list of @ of Txs per block in the range requested
+
+        Ex: Blocks 10 through 20
+        Returns a list of 10 items, each item being the # of txs total
+        '''
         self.cur.execute(
             """SELECT count FROM messages WHERE message=? AND height>=? AND height<=?""",
             (msg_type, start, end),
@@ -122,8 +138,32 @@ class Database:
         if data is None:
             return []
         return [x[0] for x in data]
+    
+    def get_types_at_height_over_range(self, msg_type: str, start_height: int, end_height: int) -> list[int]:
+        # Retuns a list of every height said msg_type is found. Ex: [6700000, 6700001, 6700002, 6700005, 6700007, ...]        
+        self.cur.execute(
+            """SELECT height FROM messages WHERE message=? AND height>=? AND height<=?""",
+            (msg_type, start_height, end_height),
+        )
+        data = self.cur.fetchall()
+        if data is None:
+            return []
+                
+        return list(set([x[0] for x in data]))
 
-    def get_all_count_over_range(self, start: int, end: int) -> list[int]:
+    def get_types_transaction_ids(self, msg_type: str, start_height: int, end_height: int) -> list[int]:
+        # Return a list of transaction ids from the Txs table, if its a msg_type & in the range of start and end
+        self.cur.execute(
+            """SELECT tx_id FROM users WHERE address=? AND height>=? AND height<=?""",
+            (msg_type, start_height, end_height),
+        )
+        data = self.cur.fetchall()
+        if data is None:
+            return []
+        return [x[0] for x in data]
+
+
+    def get_all_message_count_over_range(self, start: int, end: int) -> list[int]:
         self.cur.execute(
             """SELECT count FROM messages WHERE height>=? AND height<=?""",
             (start, end),
@@ -132,6 +172,13 @@ class Database:
         if data is None:
             return []
         return [x[0] for x in data]
+    
+    def get_earliest_block_height(self) -> int:
+        self.cur.execute("""SELECT height FROM blocks ORDER BY height ASC LIMIT 1""")
+        data = self.cur.fetchone()
+        if data is None:
+            return -1
+        return data[0]
 
     def get_total_blocks(self) -> int:
         self.cur.execute("""SELECT COUNT(*) FROM blocks""")
@@ -139,13 +186,6 @@ class Database:
         if data is None:
             return 0
         return data[0]
-
-    def insert_user(self, address: str, height: int, tx_id: int):
-        self.cur.execute(
-            """INSERT INTO users (address, height, tx_id) VALUES (?, ?, ?)""",
-            (address, height, tx_id),
-        )
-        # self.conn.commit()
 
     def get_block_txs(self, height: int) -> list[int] | None:
         self.cur.execute(
@@ -174,6 +214,8 @@ class Database:
             return {}
         return json.loads(data[0])
 
+
+    # TODO: Will process this after the fact
     def get_user_tx_ids(self, address: str) -> list[int]:
         # get all Tx ids for a given address
         self.cur.execute(
