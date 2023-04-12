@@ -306,7 +306,7 @@ async def main():
         #         print(f"Waiting to do task {len(tasks)}")
         #         await asyncio.gather(*tasks)
 
-        grouping = 50
+        grouping = 100
 
         start = 7_124_400  # original 6_700_000
         # ensure end is a multiple of grouping
