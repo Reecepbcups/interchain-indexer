@@ -2,41 +2,7 @@ import json
 import sqlite3
 from dataclasses import dataclass
 
-'''
-
-        def insert_type_count(self, msg_type: str, count: int, height: int):
-        # NOTE: This needed? - check if height already has this height
-        self.cur.execute(
-            """SELECT height FROM messages WHERE height=? AND message=?""",
-            (height, msg_type),
-        )
-        data = self.cur.fetchone()
-        if data is not None:
-            print(f"Block {height} already has {msg_type}")
-            return
-
-        self.cur.execute(
-            """INSERT INTO messages (message, height, count) VALUES (?, ?, ?)""",
-            (msg_type, height, count),
-        )
-        # self.conn.commit()
-
-    def insert_user(self, address: str, height: int, tx_id: int):
-        self.cur.execute(
-            """INSERT INTO users (address, height, tx_id) VALUES (?, ?, ?)""",
-            (address, height, tx_id),
-        )
-        # self.conn.commit()
-
-    def get_type_count_at_height(self, msg_type: str, height: int) -> int:
-        self.cur.execute(
-            """SELECT count FROM messages WHERE message=? AND height=?""",
-            (msg_type, height),
-        )
-        data = self.cur.fetchone()
-        if data is None:
-            return 0
-        return data[0]
+'''        
 
     def get_msgs_over_range(self, msg_type: str, start: int, end: int) -> list[int]:
         """
@@ -178,7 +144,16 @@ class Database:
         )
 
         # users: address, height, tx_id
+        self.cur.execute(
+            """CREATE TABLE IF NOT EXISTS users (address TEXT PRIMARY KEY, height INTEGER, tx_id INTEGER)"""
+        )        
+
         # messages: message_type, height, count
+        # This may be extra? We could just iter txs but I guess it depends. Can add in the future
+        # NOTE: May drop later
+        self.cur.execute(
+            """CREATE TABLE IF NOT EXISTS messages (message TEXT, height INTEGER, count INTEGER)"""
+        )
         
 
         self.commit()
@@ -190,6 +165,46 @@ class Database:
     def get_table_schema(self, table: str):
         self.cur.execute(f"""PRAGMA table_info({table})""")
         return self.cur.fetchall()
+    
+    def insert_type_count(self, msg_type: str, count: int, height: int):
+        # NOTE: This needed? - check if height already has this height
+        self.cur.execute(
+            """SELECT count FROM messages WHERE message=? AND height=?""",
+            (height, msg_type),
+        )
+        data = self.cur.fetchone()
+        if data is not None:
+            print(f"Block {height} already has {msg_type}")
+            return
+
+        self.cur.execute(
+            """INSERT INTO messages (message, height, count) VALUES (?, ?, ?)""",
+            (msg_type, height, count),
+        )
+        # self.conn.commit()
+
+    def get_type_count_at_height(self, msg_type: str, height: int) -> int:
+        self.cur.execute(
+            """SELECT count FROM messages WHERE message=? AND height=?""",
+            (msg_type, height),
+        )
+        data = self.cur.fetchone()
+        if data is None:
+            return 0
+        return data[0]
+
+    # User
+    def insert_user(self, address: str, height: int, tx_id: int):
+        self.cur.execute(
+            """INSERT INTO users (address, height, tx_id) VALUES (?, ?, ?)""",
+            (address, height, tx_id),
+        )
+
+    def insert_message(self, message_type: str, height: int, count: int):
+        self.cur.execute(
+            """INSERT INTO messages (message, height, count) VALUES (?, ?, ?)""",
+            (message_type, height, count),
+        )
 
     def insert_tx(self, height: int, tx_amino: str):
         # We insert the data without it being decoded. We can update later 
@@ -284,9 +299,10 @@ class Database:
         data = self.cur.fetchall()
         if data is None:
             return []
-        
-        # what if end height > what we return? Should put blank Txs here
-        # blankTx = Tx(0, 0, "", [], "")
+                
+        latest_block = self.get_latest_saved_block()
+        if end_height > latest_block.height:
+            end_height = latest_block.height                
         
         return [Tx(x[0], x[1], x[2], x[3], x[4]) for x in data]
     

@@ -27,7 +27,7 @@ from util import (  # decode_txs,; decode_txs_async,; get_sender,; remove_useles
 
 CPU_COUNT = multiprocessing.cpu_count()
 
-GROUPING = 100  # 50-100 is good.
+GROUPING = 200  # 50-200 is good.
 
 RPC_ARCHIVE_LINKS: list[str] = [
     "https://rpc-archive.junonetwork.io:443",
@@ -102,9 +102,6 @@ class BlockData:
 
 async def download_block(client: httpx.AsyncClient, pool, height: int) -> BlockData | None:
     # Skip already downloaded height data
-
-    # Note sure if this is a limiting factor or not as we add?
-    # May not be possible with async
     if db.get_block(height) != None:
         print(f"Block {height} is already downloaded & saved in SQL")
         return None
@@ -143,15 +140,15 @@ async def main():
         # print(tables)
         # schema = db.get_table_schema("messages")
         # print(schema)
-
-        latest = db.get_latest_saved_block_height()
+        latest = db.get_latest_saved_block().height
         print(latest)
 
         block = db.get_block(latest-1)        
         print("txs_in_block", block.tx_ids)
         print("time", block.time)
-        # tx = db.get_tx_amino(block.tx_ids[-1])
-        # print(tx)
+
+        tx = db.get_tx(block.tx_ids[-1])
+        print(tx.id, tx.height, tx.msg_types, tx.tx_json)
 
         pass
         exit(1)
@@ -163,14 +160,15 @@ async def main():
         block_diff = current_chain_height - last_downloaded
         print(
             f"Latest live height: {current_chain_height:,}. Last downloaded: {last_downloaded:,}. Behind by: {block_diff:,}"
-        )
+        )                
 
-        # Doing later so I can test against multiple PRs
-        # start = 7_000_000
-        start = 7_500_000
+        start = 7_000_000
+        end = 7_500_000
 
         if start <= last_downloaded:
             start = last_downloaded
+        if end > current_chain_height:
+            end = current_chain_height
 
         # ensure end is a multiple of grouping
         end = current_chain_height - (current_chain_height % GROUPING)
@@ -179,8 +177,7 @@ async def main():
         print(f"Download Spread: {difference:,} blocks")
 
         # Runs through groups for downloading from the RPC
-        async with httpx.AsyncClient() as httpx_client:
-            # TODO Move to concurrent.futures.ThreadPoolExecutor?
+        async with httpx.AsyncClient() as httpx_client:            
             with multiprocessing.Pool(CPU_COUNT*2) as pool:
                 for i in range((end - start) // GROUPING + 1):
                     tasks = {}
@@ -223,10 +220,7 @@ def save_values_to_sql(values: list[BlockData]):
         sql_tx_ids: list[int] = []
         for amino_tx in amino_txs:
             # Amino encoded Tx string in the databse
-            # We will update this in a future run after all blocks are indexed to decode
-            
-            # NOTE: Why is the amino JSON so much less effecient storage wise?
-            # 0.015MB per block now compared to 0.0001 before using JSON decoding.
+            # We will update this in a future run after all blocks are indexed to decode            
             unique_id = db.insert_tx(height, amino_tx)            
             sql_tx_ids.append(unique_id)
 
