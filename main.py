@@ -18,14 +18,14 @@ import uuid
 import httpx
 
 from SQL import Database
-from util import (  # decode_txs,; decode_txs_async,
+from util import (  # decode_txs,; decode_txs_async,; get_sender,; remove_useless_data,
     get_block_txs,
     get_latest_chain_height,
-    get_sender,
-    remove_useless_data,
 )
 
 CPU_COUNT = multiprocessing.cpu_count()
+
+GROUPING = 50  # 50-100 is good.
 
 # TODO: Save Txs & events to postgres?
 # maybe a redis cache as well so other people can subscribe to redis for events?
@@ -48,9 +48,6 @@ except Exception as e:
     print(f"Please install {COSMOS_BINARY_FILE} to your path or ~/go/bin/")
     exit(1)
 
-
-# MINIMUM_DOWNLOAD_HEIGHT = 6000000  # set to -1 if you want to ignore
-
 current_dir = os.path.dirname(os.path.realpath(__file__))
 
 ignore = [
@@ -58,78 +55,20 @@ ignore = [
     "ibc.core.channel.v1.MsgAcknowledgement",
 ]
 
-latest_height = -1
+# We will index for each user after we index everything entirely using get_sender & iterating all Txs.
+# Then we can add this as a default in the future. See notes in SQL.py
 
-data_dir = os.path.join(current_dir, "data")
-os.makedirs(data_dir, exist_ok=True)
-
-blocks = os.path.join(data_dir, "blocks")
-os.makedirs(blocks, exist_ok=True)
-
-txs_dir = os.path.join(data_dir, "txs")
-os.makedirs(txs_dir, exist_ok=True)
-
-type_stats = os.path.join(data_dir, "type_stats")
-os.makedirs(type_stats, exist_ok=True)
-
-# We will just do this after we index every Tx
-# users = os.path.join(data_dir, "users")
-# os.makedirs(users, exist_ok=True)
-
-errors = os.path.join(data_dir, "errors")
+errors = os.path.join(current_dir, "errors")
 os.makedirs(errors, exist_ok=True)
 
 
-def is_json_file(height: int) -> bool:
-    return os.path.exists(os.path.join(blocks, f"{height}.json"))
-
-
-# This will be a unique number in the future in the .db itself. For now using UUIDs for async download
-# unique_id = get_latest_tx_id()
-
-
-def get_latest_json_height() -> int:
-    files = os.listdir(blocks)
-
-    if len(files) == 0:
-        return 0
-
-    files.sort()
-    v = int(files[-1].split(".")[0])
-    print(f"Latest JSON height: {v}")
-    return v
-
-
-def save_block_data_to_json(height: int, block_data: dict):
-    # global unique_id
-    # We save to JSON here so later we can move it into the .db
-
-    # Gets unique addresses from events (users/contracts interacted with during this time frame)
-    # Useful for cache solutions. So if a user does not have any changes here, then we can keep them cached longer
-    # This only applies when we subscribe
-    # block_events = get_block_events(block_data)
-    # unique_event_addresses = get_unique_event_addresses(WALLET_PREFIX, block_events)
-    # block_data["events"]["all_unique_event_addresses"] = list(unique_event_addresses)
-
-    # Removes useless events we do not need to cache which take up lots of space
-    # updated_data = remove_useless_data(block_data)
-
+def stage_block_return_values_format(height: int, block_data: dict):
     decoded_txs = block_data["result"]["block"]["data"]["txs"]
-
-    start_tx_id = -1
-
-    # if unique_id == 0:
-    #     # get latest unique id from the txs directory
-    #     for file in os.listdir(txs_dir):
-    #         if file.endswith(".json"):
-    #             unique_id = int(file.split(".")[0])
-
-    # print(unique_id)
 
     msg_types: dict[str, int] = {}
     tx: dict
-    all_txs: list[int] = []  # ids
-    for idx, tx in enumerate(decoded_txs):
+    txs: dict[int, dict] = {}
+    for tx in decoded_txs:
         messages = tx.get("body", {}).get("messages", [])
 
         for msg in messages:
@@ -140,50 +79,31 @@ def save_block_data_to_json(height: int, block_data: dict):
                 msg_types[msg_type] = 1
 
         # if ignore is in the string of the tx, continue
+        # Since we only ignore IBC msgs we can just skip the Tx for now.
         if any(x in str(tx) for x in ignore):
             continue
 
-        # unique_id = db.insert_tx(tx)
-
         unique_id = uuid.uuid4().int
-        with open(os.path.join(txs_dir, f"{unique_id}.json"), "w") as f:
-            f.write(json.dumps(tx))
-            all_txs.append(unique_id)
+        txs[unique_id] = tx
 
-        if start_tx_id == -1:
-            start_tx_id = unique_id
+    # DEBUGGING
+    if height % 10 == 0:
+        print(f"Block {height}: {len(txs.keys())} txs")
 
-        # Do this after we index everything later
-        # sender = get_sender(height, messages[0], WALLET_PREFIX, VALOPER_PREFIX)
-        # user_data: dict[int, int] = {}
-        # if os.path.exists(os.path.join(users, f"{sender}.json")):
-        #     with open(os.path.join(users, f"{sender}.json")) as f:
-        #         user_data = json.load(f)
-        # user_data[height] = unique_id
-        # with open(os.path.join(users, f"{sender}.json"), "w") as f:
-        #     json.dump(user_data, f)
-
-    # for mtype, count in msg_types.items():
-    # db.insert_type_count(mtype, count, height)
-    with open(os.path.join(type_stats, f"{height}.json"), "w") as f:
-        json.dump(msg_types, f)
-
-    # count = db.get_type_count_at_height("/cosmwasm.wasm.v1.MsgExecuteContract", height)
-
-    # db.insert_block(height, all_txs)
-
-    with open(os.path.join(blocks, f"{height}.json"), "w") as f:
-        json.dump(all_txs, f)
-
-    # db.commit()
-
-    print(f"Block {height}: {len(all_txs)} txs")
+    # We return the values we want to save in SQL per block
+    return {
+        "height": height,
+        "msg_types": msg_types,
+        "txs": txs,  # unique_id: json
+    }
 
 
 def run_decode_single_async(tx: str) -> dict:
+    # TODO: replace this with proto in the future?
     # We run in a pool for better performance
     # check for max len tx (store code breaks this for CLI usage on linux)
     if len(tx) > 32766:
+        # Store codes
         # print("TX too long. Skipping...")
         return {}
 
@@ -191,22 +111,24 @@ def run_decode_single_async(tx: str) -> dict:
     return json.loads(res)
 
 
-async def download_block(pool, height: int):
+async def download_block(pool, height: int) -> dict | None:
     # Skip already downloaded height data
 
-    # db.get_block_txs(height) != None
-    if is_json_file(height):
-        if height % 100 == 0:
-            print(f"Block {height} is already downloaded")
-        return
+    # Note sure if this is a limiting factor or not as we add?
+    # May not be possible with async
+    if db.get_block_txs(height) != None:
+        print(f"Block {height} is already downloaded & saved in SQL")
+        return None
 
+    # Query block with client
+    # TODO: Save a pool of clients and pass through instead of generating a new one each time?
     async with httpx.AsyncClient() as client:
         r = await client.get(f"{RPC_ARCHIVE}/block?height={height}", timeout=60)
         if r.status_code != 200:
             print(f"Error: {r.status_code} @ height {height}")
             with open(os.path.join(errors, f"{height}.json"), "w") as f:
                 f.write(r.text)
-            return
+            return None
 
     # Gets block transactions, decodes them to JSON, and saves them to the block_data
     block_data: dict = r.json()
@@ -214,17 +136,10 @@ async def download_block(pool, height: int):
         block_data.get("result", {}).get("block", {}).get("data", {}).get("txs", [])
     )
 
-    # decoded_txs: list[dict] = decode_txs(COSMOS_BINARY_FILE, block_txs)
-    decoded_txs: list[dict] = []
-
-    decoded_txs = pool.map(run_decode_single_async, block_txs)
-
-    # print(block_data)
-    # exit(1)
+    decoded_txs: list[dict] = pool.map(run_decode_single_async, block_txs)
     block_data["result"]["block"]["data"]["txs"] = decoded_txs
 
-    save_block_data_to_json(height, block_data)
-    return block_data
+    return stage_block_return_values_format(height, block_data)
 
 
 def test_get_data():
@@ -233,104 +148,55 @@ def test_get_data():
     # schema = db.get_table_schema("messages")
     # print(schema)
 
-    # txs_in_block = db.get_block_txs(7781750)
-    # print(txs_in_block)
-
-    # tx = db.get_tx(txs_in_block[-1])
-    # print(tx)
-
-    # sender_txs = db.get_user_tx_ids("juno195mm9y35sekrjk73anw2az9lv9xs5mztvyvamt")
-    # print(sender_txs)
-
-    # sender_txs = db.get_user_txs("juno195mm9y35sekrjk73anw2az9lv9xs5mztvyvamt")
-    # print(sender_txs)
-
-    # # all_accs = db.get_all_accounts()
-    # # print(all_accs)
-
-    # count = db.get_type_count_at_height("/cosmwasm.wasm.v1.MsgExecuteContract", 7781750)
-    # print(count)
-
-    # total = db.get_total_blocks()
-    # print("Total Blocks", total)
-
-    # init_height = 6_000_000
-    # end_height = 6079585
-
-    # range_count = db.get_type_count_over_range(
-    #     "/cosmwasm.wasm.v1.MsgExecuteContract", init_height, end_height
-    # )
-    # all_range = db.get_all_count_over_range(init_height, end_height)
-    # print(sum(range_count))
-    # print(sum(all_range))
-
-    # exit(1)
+    latest = db.get_latest_saved_block_height()
+    print(latest)
+    txs_in_block = db.get_block_txs(latest)
+    print("txs_in_block", txs_in_block)
+    tx = db.get_tx(txs_in_block[-1])
+    print(tx)
     pass
 
 
 async def main():
-    global latest_height
-
     if False:
         test_get_data()
+        exit(1)
 
     # while loop, every 6 seconds query the RPC for latest and download. Try catch
     while True:
-        # last_downloaded = db.get_latest_saved_block_height()
-
-        # last_downloaded = get_latest_json_height()
+        last_downloaded = db.get_latest_saved_block_height()
         current_chain_height = get_latest_chain_height(RPC_ARCHIVE=RPC_ARCHIVE)
-        # block_diff = latest_height - last_downloaded
+        block_diff = current_chain_height - last_downloaded
+        print(
+            f"Latest live height: {current_chain_height:,}. Last downloaded: {last_downloaded:,}. Behind by: {block_diff:,}"
+        )
 
-        # if block_diff > 0:
-        #     print(
-        #         f"Downloading blocks, latest height: {latest_height}. Behind by: {block_diff}"
-        #     )
+        start = 7000000  # original 6_700_000
+        if start <= last_downloaded:
+            start = last_downloaded
 
-        #     if MINIMUM_DOWNLOAD_HEIGHT > 0:
-        #         if last_downloaded < MINIMUM_DOWNLOAD_HEIGHT:
-        #             last_downloaded = MINIMUM_DOWNLOAD_HEIGHT
-
-        #     last_downloaded = 6_000_000
-        #     latest_height = 6_000_100
-
-        #     # pre define size since it could be >1_000_000
-        #     # tasks = [None] * (block_diff + 1)
-        #     tasks = []
-
-        #     with multiprocessing.Pool(multiprocessing.cpu_count()) as pool:
-        #         # for i in range(last_downloaded - 1, latest_height + 1):
-        #         for i in range(last_downloaded - 1, latest_height + 1):
-        #             tasks.append(asyncio.create_task(download_block(i)))
-
-        #         print(f"Waiting to do task {len(tasks)}")
-        #         await asyncio.gather(*tasks)
-
-        grouping = 100
-
-        start = 7_185_400  # original 6_700_000
         # ensure end is a multiple of grouping
-        # end = start + 500
-        end = current_chain_height - (current_chain_height % grouping)
-        print(end)
+        end = current_chain_height - (current_chain_height % GROUPING)
 
         difference = int(end) - start
         print(f"Download Spread: {difference:,} blocks")
-        # exit(1)
 
         # Runs through groups for downloading from the RPC
         with multiprocessing.Pool(CPU_COUNT) as pool:
-            for i in range((end - start) // grouping + 1):
+            for i in range((end - start) // GROUPING + 1):
                 tasks = {}
                 start_time = time.time()
-                for j in range(grouping):
+                for j in range(GROUPING):
                     # block index from the grouping its in
-                    block = start + i * grouping + j
+                    block = start + i * GROUPING + j
                     tasks[block] = asyncio.create_task(download_block(pool, block))
 
                 print(f"Waiting to do # of blocks: {len(tasks)}")
+
+                # This should never happen, just a precaution
                 try:
-                    await asyncio.gather(*tasks.values())
+                    values = await asyncio.gather(*tasks.values())
+                    save_values_to_sql(values)
                 except Exception as e:
                     print(e)
                     print("Error in tasks")
@@ -341,19 +207,61 @@ async def main():
                     f"Finished #{len(tasks)} of tasks in {end_time - start_time} seconds"
                 )
 
-            print("Finished")  # do a sleep here in the future
-            exit(1)
+                # print(f"early return on purpose for testing"); exit(1)
+
+        print("Finished")
+        time.sleep(6)
+
+
+def save_values_to_sql(values: list[dict]):
+    # values are from save_block_data_to_json
+    # Schema: {
+    #     "height": height,
+    #     "msg_types": msg_types, # dict[str, int] = {}
+    #     "txs": txs,  # unique_id: json
+    # }
+
+    for value in values:
+        if value == None:  # if we already downloaded or there was an error
+            continue
+
+        height = value["height"]
+        msg_types = dict(value["msg_types"])
+        block_txs = dict(value["txs"])
+
+        # if any of the above are none, skip
+        if height == None or msg_types == None or block_txs == None:
+            # write to log
+            with open("error.log", "a") as f:
+                f.write(
+                    f"Error in height: {height} for blocks and data in save_values_to_sql"
+                )
+            continue
+
+        sql_tx_ids: list[int] = []
+        for _, tx_json in block_txs.items():
+            # print(_, tx_json); exit(1)
+            # our database Unique ID of a Tx
+            unique_id = db.insert_tx(tx_json)
+            sql_tx_ids.append(unique_id)
+
+        db.insert_block(height, sql_tx_ids)
+        for msg_type, count in msg_types.items():
+            db.insert_type_count(msg_type, count, height)
+
+        # print(f"save_values_to_sql. Exited early")
+        # exit(1)
+
+    # Saves to it after we go through all group of blocks
+    db.commit()
+    pass
 
 
 # from websocket import create_connection
 if __name__ == "__main__":
-    # db = Database(os.path.join(current_dir, "data.db"))
+    db = Database(os.path.join(current_dir, "data.db"))
     # # db.drop_all()
-    # db.create_tables()
-
-    # latest_height = db.get_latest_saved_block_height()
-    latest_height = get_latest_json_height()
-    print(f"Latest saved block height: {latest_height}")
+    db.create_tables()
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
