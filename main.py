@@ -27,13 +27,10 @@ CPU_COUNT = multiprocessing.cpu_count()
 
 GROUPING = 50  # 50-100 is good.
 
-# TODO: Save Txs & events to postgres?
-# maybe a redis cache as well so other people can subscribe to redis for events?
-
-# https://docs.tendermint.com/v0.34/rpc/
 RPC_IP = "15.204.143.232:26657"  # if this is blank, we update every 6 seconds
 RPC_URL = f"ws://{RPC_IP}/websocket"
-RPC_ARCHIVE = "https://rpc-archive.junonetwork.io:443"
+# RPC_ARCHIVE = "https://rpc-archive.junonetwork.io:443"
+RPC_ARCHIVE = "https://rpc.juno.strange.love:443"
 
 WALLET_PREFIX = "juno1"
 VALOPER_PREFIX = "junovaloper1"
@@ -171,7 +168,12 @@ async def main():
             f"Latest live height: {current_chain_height:,}. Last downloaded: {last_downloaded:,}. Behind by: {block_diff:,}"
         )
 
-        start = 7000000  # original 6_700_000
+        # start = 7_299_000  # original 6_700_000
+        # I need to get these blocks again in the future: 7_299_000 -> 7408700
+
+        start = 7408700
+
+
         if start <= last_downloaded:
             start = last_downloaded
 
@@ -196,7 +198,7 @@ async def main():
                 # This should never happen, just a precaution
                 try:
                     values = await asyncio.gather(*tasks.values())
-                    save_values_to_sql(values)
+                    save_values_to_sql(values)                    
                 except Exception as e:
                     print(e)
                     print("Error in tasks")

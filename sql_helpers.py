@@ -30,10 +30,10 @@ def main():
     # values = db.get_types_at_height_over_range("/cosmwasm.wasm.v1.MsgExecuteContract", earliest_block, latest_height)
     # print(len(values))\
 
-    txs = db.get_msg_ids_in_range(
-        "/cosmwasm.wasm.v1.MsgExecuteContract", earliest_block, earliest_block + 1000
-    )
-    print(txs)
+    # txs = db.get_msg_ids_in_range(
+    #     "/cosmwasm.wasm.v1.MsgExecuteContract", earliest_block, earliest_block + 1000
+    # )
+    # print(txs)
 
     # TODO: Get which heights blocks are at
 
