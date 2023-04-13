@@ -143,6 +143,17 @@ class Block:
     def to_json(self) -> str:
         return json.dumps(self.__dict__)
 
+@dataclass
+class Tx:
+    id: int
+    height: int
+    tx_amino: str
+    # msg_types: list[str]
+    # tx_json: str
+
+    def to_json(self) -> str:
+        return json.dumps(self.__dict__)
+
 class Database:
     def __init__(self, db: str):
         self.conn = sqlite3.connect(db)
@@ -199,20 +210,20 @@ class Database:
     #     return self.cur.lastrowid
 
     def insert_block(self, height: int, time: str, txs_ids: list[int]):
-        # insert the height and tx_amino, then return the unique id
+        # insert the height and tx_amino.
         self.cur.execute(
             """INSERT INTO blocks (height, time, txs) VALUES (?, ?, ?)""",
             (height, time, json.dumps(txs_ids)),
         )
-        return self.cur.lastrowid
+        
     
 
-    def get_earliest_block_height(self) -> int:
-        self.cur.execute("""SELECT height FROM blocks ORDER BY height ASC LIMIT 1""")
+    def get_earliest_block(self) -> Block | None:
+        self.cur.execute("""SELECT * FROM blocks ORDER BY height ASC LIMIT 1""")
         data = self.cur.fetchone()
         if data is None:
-            return -1
-        return data[0]
+            return None        
+        return Block(data[0], data[1], json.loads(data[2]))
 
     def get_total_blocks(self) -> int:
         self.cur.execute("""SELECT COUNT(*) FROM blocks""")
@@ -224,17 +235,17 @@ class Database:
     def get_missing_blocks(self, start_height, end_height) -> list[int]:
         # get all blocks which we do not have value for between a range
         self.cur.execute(
-            """SELECT height FROM blocks WHERE height>=? AND height<=?""",
+            """SELECT height FROM blocks WHERE height BETWEEN ? AND ?""",
             (start_height, end_height),
         )
         data = self.cur.fetchall()
         if data is None:
-            return []
+            return list(range(start_height, end_height+1))
         
         found_heights = set(x[0] for x in data)
         missing_heights = [height for height in range(start_height, end_height+1) if height not in found_heights]
         return missing_heights
-    
+        
     def get_block(self, block_height: int) -> Block | None:
         self.cur.execute(
             """SELECT * FROM blocks WHERE height=?""",
@@ -243,59 +254,27 @@ class Database:
         data = self.cur.fetchone()        
         if data is None:
             return None
-        # return {
-        #     "height": data[0],
-        #     "time": data[1],
-        #     "txs": json.loads(data[2]),
-        # }
+        
         return Block(data[0], data[1], json.loads(data[2]))
 
-    def get_latest_saved_block_height(self) -> int:
-        self.cur.execute("""SELECT height FROM blocks ORDER BY height DESC LIMIT 1""")
+    def get_latest_saved_block(self) -> Block:
+        self.cur.execute("""SELECT * FROM blocks ORDER BY height DESC LIMIT 1""")
         data = self.cur.fetchone()
         if data is None:
-            return 0
-        return data[0]
-
-    def get_tx_amino(self, tx_id: int) -> str:
+            return Block(0, "", [])
+        
+        return Block(data[0], data[1], json.loads(data[2]))
+       
+    def get_tx(self, tx_id: int) -> Tx | None:
         self.cur.execute(
-            """SELECT tx_amino FROM txs WHERE id=?""",
+            """SELECT * FROM txs WHERE id=?""",
             (tx_id,),
         )
         data = self.cur.fetchone()
         if data is None:
-            return ""
-        return data[0]
+            return None
+        
+        print(data[0], data[1], data[2])
+        return Tx(data[0], data[1], data[2])
     
     # get_tx_json ,_ need to write a mass decode script
-    
-    # TODO: Will process this after the fact
-    # def get_user_tx_ids(self, address: str) -> list[int]:
-    #     # get all Tx ids for a given address
-    #     self.cur.execute(
-    #         """SELECT tx_id FROM users WHERE address=?""",
-    #         (address,),
-    #     )
-    #     data = self.cur.fetchall()
-    #     if data is None:
-    #         return []
-
-    #     return [tx_id[0] for tx_id in data]
-
-    # def get_user_txs(self, address: str) -> dict:
-    #     tx_ids = self.get_user_tx_ids(address)
-    #     txs = {}
-    #     for tx_id in tx_ids:
-    #         tx = self.get_tx(tx_id)
-    #         txs[tx_id] = tx
-    #     return txs
-
-    # def get_all_accounts(self) -> list[str]:
-    #     # return all accounts and the len of txs they have
-    #     self.cur.execute(
-    #         """SELECT address, COUNT(tx_id) FROM users GROUP BY address""",
-    #     )
-    #     data = self.cur.fetchall()
-    #     if data is None:
-    #         return []
-    #     return data

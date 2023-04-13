@@ -15,6 +15,7 @@ import os
 import random
 import time
 import uuid
+from dataclasses import dataclass
 
 import httpx
 
@@ -92,9 +93,14 @@ def stage_block_return_values_format(height: int, decoded_txs: list[dict] = []):
     }
 '''
 
+@dataclass
+class BlockData:
+    height: int
+    block_time: str
+    encoded_txs: list[str]
 
 
-async def download_block(client: httpx.AsyncClient, pool, height: int) -> dict | None:
+async def download_block(client: httpx.AsyncClient, pool, height: int) -> BlockData | None:
     # Skip already downloaded height data
 
     # Note sure if this is a limiting factor or not as we add?
@@ -123,13 +129,12 @@ async def download_block(client: httpx.AsyncClient, pool, height: int) -> dict |
         encoded_block_txs = v["data"]["txs"] # ["amino1"]
     except KeyError:
         return None
+    
+    # Removes store_codes
+    encoded_block_txs = [x for x in encoded_block_txs if len(x) < 32000]
 
     # return stage_block_return_values_format(height, decoded_txs=decoded_txs)
-    return {
-        "height": height,
-        "block_time": block_time,
-        "encoded_txs": encoded_block_txs,
-    }
+    return BlockData(height, block_time, encoded_block_txs)
 
 
 async def main():
@@ -153,7 +158,7 @@ async def main():
 
     # while loop, every 6 seconds query the RPC for latest and download. Try catch
     while True:
-        last_downloaded = db.get_latest_saved_block_height()
+        last_downloaded: int = db.get_latest_saved_block().height
         current_chain_height = get_latest_chain_height(RPC_ARCHIVE=RPC_ARCHIVE_LINKS[0])
         block_diff = current_chain_height - last_downloaded
         print(
@@ -161,7 +166,8 @@ async def main():
         )
 
         # Doing later so I can test against multiple PRs
-        start = 7_000_000
+        # start = 7_000_000
+        start = 7_500_000
 
         if start <= last_downloaded:
             start = last_downloaded
@@ -175,7 +181,7 @@ async def main():
         # Runs through groups for downloading from the RPC
         async with httpx.AsyncClient() as httpx_client:
             # TODO Move to concurrent.futures.ThreadPoolExecutor?
-            with multiprocessing.Pool(CPU_COUNT) as pool:
+            with multiprocessing.Pool(CPU_COUNT*2) as pool:
                 for i in range((end - start) // GROUPING + 1):
                     tasks = {}
                     start_time = time.time()
@@ -195,7 +201,7 @@ async def main():
 
                     end_time = time.time()
                     print(
-                        f"Finished #{len(tasks)} blocks in {end_time - start_time} seconds"
+                        f"Finished #{len(tasks)} blocks in {end_time - start_time} seconds @ {start + i * GROUPING}"
                     )
 
                     # print(f"early return on purpose for testing"); exit(1)
@@ -205,38 +211,23 @@ async def main():
         exit(1)
 
 
-def save_values_to_sql(values: list[dict]):    
-    # Schema: {
-    #     "height": height,
-    #     "block_time": block_time,
-    #     "encoded_txs": encoded_block_txs,
-    # }
-
-
-    for value in values:
-        if value == None or value == {}:  # if we already downloaded or there was an error
+def save_values_to_sql(values: list[BlockData]):    
+    for bd in values:
+        if bd == None:  # if we already downloaded or there was an error
             continue
 
-        height = value["height"]
-        block_time = value["block_time"]
-        amino_txs = value["encoded_txs"]        
-
-        # if any of the above are none, skip
-        if height == None or block_time == None or amino_txs == None:
-            # write to log
-            with open("error.log", "a") as f:
-                f.write(
-                    f"Error in height: {height} for blocks and data in save_values_to_sql"
-                )
-            continue
-
+        height = bd.height
+        block_time = bd.block_time
+        amino_txs: list[str] = bd.encoded_txs
         
         sql_tx_ids: list[int] = []
         for amino_tx in amino_txs:
             # Amino encoded Tx string in the databse
             # We will update this in a future run after all blocks are indexed to decode
-            # print(height, amino_tx)
-            unique_id = db.insert_tx(height, amino_tx)
+            
+            # NOTE: Why is the amino JSON so much less effecient storage wise?
+            # 0.015MB per block now compared to 0.0001 before using JSON decoding.
+            unique_id = db.insert_tx(height, amino_tx)            
             sql_tx_ids.append(unique_id)
 
 
