@@ -108,7 +108,7 @@ def run_decode_single_async(tx: str) -> dict:
     return json.loads(res)
 
 
-async def download_block(pool, height: int) -> dict | None:
+async def download_block(client: httpx.AsyncClient, pool, height: int) -> dict | None:
     # Skip already downloaded height data
 
     # Note sure if this is a limiting factor or not as we add?
@@ -117,15 +117,13 @@ async def download_block(pool, height: int) -> dict | None:
         print(f"Block {height} is already downloaded & saved in SQL")
         return None
 
-    # Query block with client
-    # TODO: Save a pool of clients and pass through instead of generating a new one each time?
-    async with httpx.AsyncClient() as client:
-        r = await client.get(f"{RPC_ARCHIVE}/block?height={height}", timeout=60)
-        if r.status_code != 200:
-            print(f"Error: {r.status_code} @ height {height}")
-            with open(os.path.join(errors, f"{height}.json"), "w") as f:
-                f.write(r.text)
-            return None
+    # Query block with client        
+    r = await client.get(f"{RPC_ARCHIVE}/block?height={height}", timeout=60)
+    if r.status_code != 200:
+        print(f"Error: {r.status_code} @ height {height}")
+        with open(os.path.join(errors, f"{height}.json"), "w") as f:
+            f.write(r.text)
+        return None
 
     # Gets block transactions, decodes them to JSON, and saves them to the block_data
     block_data: dict = r.json()
@@ -171,7 +169,7 @@ async def main():
         # start = 7_299_000  # original 6_700_000
         # I need to get these blocks again in the future: 7_299_000 -> 7408700
 
-        start = 7_417_100
+        start = 7_446_500
 
         if start <= last_downloaded:
             start = last_downloaded
@@ -183,32 +181,33 @@ async def main():
         print(f"Download Spread: {difference:,} blocks")
 
         # Runs through groups for downloading from the RPC
-        with multiprocessing.Pool(CPU_COUNT) as pool:
-            for i in range((end - start) // GROUPING + 1):
-                tasks = {}
-                start_time = time.time()
-                for j in range(GROUPING):
-                    # block index from the grouping its in
-                    block = start + i * GROUPING + j
-                    tasks[block] = asyncio.create_task(download_block(pool, block))
+        async with httpx.AsyncClient() as httpx_client:
+            with multiprocessing.Pool(CPU_COUNT) as pool:
+                for i in range((end - start) // GROUPING + 1):
+                    tasks = {}
+                    start_time = time.time()
+                    for j in range(GROUPING):
+                        # block index from the grouping its in
+                        block = start + i * GROUPING + j
+                        tasks[block] = asyncio.create_task(download_block(httpx_client, pool, block))
 
-                print(f"Waiting to do # of blocks: {len(tasks)}")
+                    print(f"Waiting to do # of blocks: {len(tasks)}")
 
-                # This should never happen, just a precaution
-                try:
-                    values = await asyncio.gather(*tasks.values())
-                    save_values_to_sql(values)
-                except Exception as e:
-                    print(e)
-                    print("Error in tasks")
-                    continue
+                    # This should never happen, just a precaution
+                    try:
+                        values = await asyncio.gather(*tasks.values())
+                        save_values_to_sql(values)
+                    except Exception as e:
+                        print(e)
+                        print("Error in tasks")
+                        continue
 
-                end_time = time.time()
-                print(
-                    f"Finished #{len(tasks)} of tasks in {end_time - start_time} seconds"
-                )
+                    end_time = time.time()
+                    print(
+                        f"Finished #{len(tasks)} of tasks in {end_time - start_time} seconds"
+                    )
 
-                # print(f"early return on purpose for testing"); exit(1)
+                    # print(f"early return on purpose for testing"); exit(1)
 
         print("Finished")
         time.sleep(6)        
