@@ -148,8 +148,8 @@ class Tx:
     id: int
     height: int
     tx_amino: str
-    # msg_types: list[str]
-    # tx_json: str
+    msg_types: list[str]
+    tx_json: str
 
     def to_json(self) -> str:
         return json.dumps(self.__dict__)
@@ -201,13 +201,12 @@ class Database:
         )
         return self.cur.lastrowid
     
-    # def update_tx(self, id: int, tx_json: str, msg_types: str):
-    #     # update the data after we decode it (post insert_tx)
-    #     self.cur.execute(
-    #         """UPDATE txs SET tx_json=?, msg_types=? WHERE id=?""",
-    #         (tx_json, msg_types, id),
-    #     )        
-    #     return self.cur.lastrowid
+    def update_tx(self, id: int, tx_json: str, msg_types: str):
+        # update the data after we decode it (post insert_tx)
+        self.cur.execute(
+            """UPDATE txs SET tx_json=?, msg_types=? WHERE id=?""",
+            (tx_json, msg_types, id),
+        )                
 
     def insert_block(self, height: int, time: str, txs_ids: list[int]):
         # insert the height and tx_amino.
@@ -273,8 +272,19 @@ class Database:
         data = self.cur.fetchone()
         if data is None:
             return None
+                
+        return Tx(data[0], data[1], data[2], data[3], data[4])
+    
+
+    def get_txs_in_range(self, start_height: int, end_height: int) -> list[Tx]:
+        self.cur.execute(
+            """SELECT * FROM txs WHERE height BETWEEN ? AND ?""",
+            (start_height, end_height),
+        )
+        data = self.cur.fetchall()
+        if data is None:
+            return []
         
-        print(data[0], data[1], data[2])
-        return Tx(data[0], data[1], data[2])
+        return [Tx(x[0], x[1], x[2], x[3], x[4]) for x in data]
     
     # get_tx_json ,_ need to write a mass decode script
