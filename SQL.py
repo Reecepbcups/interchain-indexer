@@ -292,17 +292,17 @@ class Database:
     
 
     def get_txs_in_range(self, start_height: int, end_height: int) -> list[Tx]:
+        latest_block = self.get_latest_saved_block()
+        if end_height > latest_block.height:
+            end_height = latest_block.height    
+            
         self.cur.execute(
             """SELECT * FROM txs WHERE height BETWEEN ? AND ?""",
             (start_height, end_height),
         )
         data = self.cur.fetchall()
         if data is None:
-            return []
-                
-        latest_block = self.get_latest_saved_block()
-        if end_height > latest_block.height:
-            end_height = latest_block.height                
+            return []                                    
         
         return [Tx(x[0], x[1], x[2], x[3], x[4]) for x in data]
     
