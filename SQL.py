@@ -213,7 +213,7 @@ class Database:
                     continue
 
                 tx_data = json.loads(tx_data[0])
-                print(tx_data)
+                # print(tx_data)
                 msg_types = self._get_transactions_Msg_Types(tx_data)
                 if msg_type in msg_types:
                     tx_ids.add(tx_id)
