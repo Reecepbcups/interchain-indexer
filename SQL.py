@@ -10,13 +10,6 @@ class Database:
     def commit(self):
         self.conn.commit()
 
-    def drop_all(self):
-        self.cur.execute("""DROP TABLE IF EXISTS blocks""")
-        self.cur.execute("""DROP TABLE IF EXISTS txs""")
-        self.cur.execute("""DROP TABLE IF EXISTS users""")
-        self.cur.execute("""DROP TABLE IF EXISTS messages""")
-        self.commit()
-
     def create_tables(self):
         # Blocks: contains height and a list of integer ids
         # Txs: a list of unique integer ids and a string of the tx. Where Txs = a JSON array
@@ -49,6 +42,7 @@ class Database:
         )
 
         # create a message types table
+        # set this as the pimray key?
         self.cur.execute(
             """CREATE TABLE IF NOT EXISTS messages (
                 message text not null,
@@ -78,16 +72,6 @@ class Database:
         return self.cur.lastrowid or -1
 
     def insert_block(self, height: int, txs: list[int]):
-        # check if height is already in the database, if so return
-        self.cur.execute(
-            """SELECT height FROM blocks WHERE height=?""",
-            (height,),
-        )
-        data = self.cur.fetchone()
-        if data is not None:
-            print(f"Block {height} already in database")
-            return
-
         data = json.dumps(txs)
         self.cur.execute(
             """INSERT INTO blocks (height, txs) VALUES (?, ?)""",

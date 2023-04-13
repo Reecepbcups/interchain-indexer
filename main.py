@@ -16,7 +16,6 @@ import time
 import uuid
 
 import httpx
-
 from SQL import Database
 from util import (  # decode_txs,; decode_txs_async,; get_sender,; remove_useless_data,
     get_block_txs,
@@ -39,6 +38,7 @@ WALLET_LENGTH = 43
 # junod works as well, this is just a lightweight decoder of it.
 COSMOS_BINARY_FILE = "juno-decode"  # https://github.com/Reecepbcups/juno-decoder
 try:
+    # TODO This does not actually work. 
     res = os.popen(f"{COSMOS_BINARY_FILE}").read()
     # print(res)
 except Exception as e:
@@ -59,8 +59,8 @@ errors = os.path.join(current_dir, "errors")
 os.makedirs(errors, exist_ok=True)
 
 
-def stage_block_return_values_format(height: int, block_data: dict):
-    decoded_txs = block_data["result"]["block"]["data"]["txs"]
+def stage_block_return_values_format(height: int, decoded_txs: list[dict] = []):
+    # decoded_txs = block_data["result"]["block"]["data"]["txs"]
 
     msg_types: dict[str, int] = {}
     tx: dict
@@ -125,16 +125,17 @@ async def download_block(client: httpx.AsyncClient, pool, height: int) -> dict |
             f.write(r.text)
         return None
 
-    # Gets block transactions, decodes them to JSON, and saves them to the block_data
-    block_data: dict = r.json()
-    block_txs = (
-        block_data.get("result", {}).get("block", {}).get("data", {}).get("txs", [])
-    )
+    # Gets block transactions, decodes them to JSON
+    block_txs: list = []
+    try:
+        block_txs = r.json()["result"]["block"]["data"]["txs"]
+    except KeyError:
+        pass # [] by default
+
 
     decoded_txs: list[dict] = pool.map(run_decode_single_async, block_txs)
-    block_data["result"]["block"]["data"]["txs"] = decoded_txs
 
-    return stage_block_return_values_format(height, block_data)
+    return stage_block_return_values_format(height, decoded_txs=decoded_txs)
 
 
 def test_get_data():
@@ -168,8 +169,9 @@ async def main():
 
         # start = 7_299_000  # original 6_700_000
         # I need to get these blocks again in the future: 7_299_000 -> 7408700
+        # then iter though all and save any Txs which are not in the SQL database
 
-        start = 7_484_000
+        start = 7_695_300
 
         if start <= last_downloaded:
             start = last_downloaded
@@ -223,7 +225,7 @@ def save_values_to_sql(values: list[dict]):
     # }
 
     for value in values:
-        if value == None:  # if we already downloaded or there was an error
+        if value == None or value == {}:  # if we already downloaded or there was an error
             continue
 
         height = value["height"]
