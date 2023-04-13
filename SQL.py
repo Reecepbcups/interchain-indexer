@@ -285,6 +285,9 @@ class Database:
         if data is None:
             return []
         
+        # what if end height > what we return? Should put blank Txs here
+        # blankTx = Tx(0, 0, "", [], "")
+        
         return [Tx(x[0], x[1], x[2], x[3], x[4]) for x in data]
     
     # get_tx_json ,_ need to write a mass decode script

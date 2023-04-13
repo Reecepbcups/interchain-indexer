@@ -43,12 +43,17 @@ def main():
 
     # TODO: Get which heights blocks are at
 
+
+    block = db.get_block(7_500_000)
+
     # # get the transactions at this height
-    tx_ids = latest_block.tx_ids       
-    print(f"Latest block Tx IDs. Height: {latest_block.height}: {tx_ids}")
+    # tx_ids = latest_block.tx_ids       
+    # print(f"Latest block Tx IDs. Height: {latest_block.height}: {tx_ids}")
     # # show the first tx in the txs list
-    tx = db.get_tx(tx_ids[0])
+    tx = db.get_tx(block.tx_ids[0])
     print(f"First Transaction: id:{tx.id}, amino:{tx.tx_amino}")
+    print(f"First Transaction: id:{tx.id}, amino:{tx.tx_json}")
+    print(f"First Transaction: id:{tx.id}, amino:{tx.msg_types}")
 
 
 if __name__ == "__main__":

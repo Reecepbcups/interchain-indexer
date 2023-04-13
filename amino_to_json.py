@@ -8,22 +8,53 @@ Goal:
 '''
 
 
+import asyncio
 import json
 import multiprocessing
 import os
+import subprocess
 import time
-from concurrent.futures import ThreadPoolExecutor
 
 from SQL import Database
 
 current_dir = os.path.dirname(os.path.realpath(__file__))
 
 CONVERT_START = 7_500_000
-CONVERT_END = 7_500_100 # 7_819_899 # latest
+CONVERT_END = 7_819_899 # 7_819_899 # latest
 
 CPU_THREADS = multiprocessing.cpu_count()
 
-def main():
+COSMOS_BINARY_FILE = "juno-decode"
+def run_decode_single_async(tx: str) -> dict:
+    # TODO: replace this with proto in the future?    
+    if len(tx) > 32000:
+        # Store codes
+        return {}
+
+    print(f"Decoding: {tx[0:100]}")
+    res = os.popen(f"{COSMOS_BINARY_FILE} tx decode {tx} --output json").read()
+    return json.loads(res)
+
+def run_decode_file(file_loc: str, output_file_loc: str) -> dict: # change to be a list of dicts?    
+    res = os.popen(f"{COSMOS_BINARY_FILE} tx decode-file {file_loc} {output_file_loc}").read()
+    
+    values = {}
+    with open(output_file_loc, 'r') as f:
+        values = json.load(f)
+
+    return values
+
+def run_asyncio_commands(tasks, max_concurrent_tasks=0):
+    if max_concurrent_tasks == 0:
+        max_concurrent_tasks = len(tasks)
+    loop = asyncio.get_event_loop()
+    semaphore = asyncio.Semaphore(max_concurrent_tasks)
+    async def run_command(task):
+        async with semaphore:
+            return await task
+    return loop.run_until_complete(asyncio.gather(*[run_command(task) for task in tasks]))
+
+async def main():
     db = Database(os.path.join(current_dir, "data.db"))
     # latest_block = db.get_latest_saved_block()
     # print(f"Latest Block Height: {latest_block.height}")
@@ -31,42 +62,65 @@ def main():
     total = db.get_total_blocks()
     print(f"Total Blocks: {total}")
 
-    # earliest_block = db.get_earliest_block()
-    # print(f"Earliest Block: {earliest_block.height}")
-
-    # create a pool of threads for CPU_THREADS
-    pool = multiprocessing.Pool(CPU_THREADS)    
-
-
-
     txs = db.get_txs_in_range(CONVERT_START, CONVERT_END)
     print(f"Total Txs: {len(txs)}")
 
-    to_decode = {}
-    for tx in txs:
-        if len(tx.tx_json) == 0:
-            # print("Decoding")
-            to_decode[tx.id] = tx.tx_amino
-        
-        # every 100, decode
-        # if len(to_decode) >= 250:
-        #     start_time = time.time()
-        #     decoded = pool.map(run_decode_single_async, to_decode.values())
-        #     end_time = time.time()
-        #     print(f"Time to decode ({len(to_decode)}): {end_time - start_time}")        
-        #     # for tx_id, tx in zip(to_decode.keys(), decoded):
-        #         # db.update_tx(tx_id, json.dumps(tx))
-        #     # then commit here
-        #     to_decode = {}
 
-        # do the above with threading
-        if len(to_decode) >= 250:
-            start_time = time.time()
-            with ThreadPoolExecutor() as executor:
-                decoded = executor.map(run_decode_single_async, to_decode.values())                
-            end_time = time.time()
-            print(f"Time to decode ({len(to_decode)}): {end_time - start_time}")
-            to_decode = {}
+    def do_logic(to_decode: list[dict]):
+        start_time = time.time()
+
+        # Dump our amino to file so the juno-decoder can pick it up (decodes in chunks)    
+        with open('amino.json', 'w') as f:
+            json.dump(to_decode, f)  
+
+        values = run_decode_file("amino.json", "output.json")
+
+        for data in values:
+            tx_id = data["id"]
+            tx_data = json.loads(data["tx"])
+
+            # get message types
+            msg_types_set = set()
+            for msg in tx_data["body"]["messages"]:
+                msg_types_set.add(msg["@type"])
+
+            msg_types = list(msg_types_set)
+            msg_types.sort()
+
+            # print(tx_id, tx_data, msg_types)
+            db.update_tx(tx_id, json.dumps(tx_data), json.dumps(msg_types)) 
+            # exit(1)
+        db.commit()
+        end_time = time.time()
+        print(f"Time to decode & store ({len(to_decode)}): {end_time - start_time}") 
+        pass
+
+    to_decode = []
+    for tx in txs:
+        if len(tx.tx_json) == 0:                        
+            if len(tx.tx_amino) > 30_000:
+                # ignore storecode
+                continue
+
+            to_decode.append({
+                "id": tx.id,
+                "tx": tx.tx_amino
+            })            
+                
+        if len(to_decode) >= 5_000:
+            do_logic(to_decode)
+            to_decode.clear()            
+
+
+    # if to_decode still has some though less than 5000, then run it one last time and bypass
+    if len(to_decode) > 0:
+        do_logic(to_decode)
+        to_decode.clear()
+
+    # done
+    print("Done")
+    pass
+
 
 
 
@@ -128,15 +182,7 @@ def main():
     # print(f"First Transaction: id:{tx.id}, amino:{tx.tx_amino}")
 
 
-COSMOS_BINARY_FILE = "juno-decode"
-def run_decode_single_async(tx: str) -> dict:
-    # TODO: replace this with proto in the future?    
-    if len(tx) > 32000:
-        # Store codes
-        return {}
 
-    res = os.popen(f"{COSMOS_BINARY_FILE} tx decode {tx} --output json").read()
-    return json.loads(res)
 
 
 def get_sender(msg: dict, WALLET_PREFIX: str, VALOPER_PREFIX: str) -> str | None:
@@ -173,4 +219,5 @@ def get_sender(msg: dict, WALLET_PREFIX: str, VALOPER_PREFIX: str) -> str | None
     return None
 
 if __name__ == "__main__":
-    main()
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(main())    

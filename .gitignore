@@ -1,5 +1,4 @@
 blocks/*.json
-latest_height.txt
 __pycache__/
 
 data.db
@@ -9,3 +8,5 @@ data*.db
 *.db-journal
 
 errors/
+
+*.json
