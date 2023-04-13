@@ -7,28 +7,6 @@ import httpx
 current_dir = os.path.dirname(os.path.realpath(__file__))
 
 
-# def __run_decode(cosmos_binary: str, tx: str) -> dict:
-#     # check for max len tx (store code breaks this for CLI usage on linux)
-#     if len(tx) > 32766:
-#         # print("TX too long. Skipping...")
-#         return {}
-
-#     res = os.popen(f"{cosmos_binary} tx decode {tx} --output json").read()
-#     return json.loads(res)
-
-
-# def decode_txs(COSMOS_BINARY_FILE: str, block_txs: list[str]) -> list:
-#     decoded_txs = []
-
-#     # iterate through each and convert to json with junod
-#     for txs in block_txs:
-#         tx = __run_decode(COSMOS_BINARY_FILE, txs)
-#         if isinstance(tx, dict) and len(tx) > 0:
-#             decoded_txs.append(tx)
-
-#     return decoded_txs
-
-
 def get_sender(msg: dict, WALLET_PREFIX: str, VALOPER_PREFIX: str) -> str | None:
     keys = [
         "sender",
@@ -76,25 +54,17 @@ def get_latest_chain_height(RPC_ARCHIVE: str) -> int:
         .get("last_block_height", "-1")
     )
     print(f"Current Height: {current_height}")
-    if current_height == "-1":
-        print("Could not get current height. Exiting...")
-        return -1
 
     return int(current_height)
 
 
 def get_block_events(block_data: dict) -> dict:
+    # Likely not used anymore since I am not subscribing
     return block_data.get("events", {})
 
 
-def get_block_height(block_data: dict) -> int:
-    height = block_data["data"]["value"]["block"]["header"]["height"]
-    print(f"Block Height: {height}")
-
-    return height
-
-
 def get_unique_event_addresses(wallet_prefix: str, block_events: dict) -> list[str]:
+    # Likely not used anymore since I am not subscribing
     # any address which had some action in the block
     event_addresses: list[str] = []
 
@@ -110,6 +80,13 @@ def get_unique_event_addresses(wallet_prefix: str, block_events: dict) -> list[s
     return event_addresses
 
 
+def get_block_height(block_data: dict) -> int:
+    height = block_data["data"]["value"]["block"]["header"]["height"]
+    print(f"Block Height: {height}")
+
+    return height
+
+
 def remove_useless_data(block_data: dict) -> dict:
     # remove result_begin_block in the value section
     # del block_data["data"]["value"]["result_begin_block"]
@@ -117,6 +94,7 @@ def remove_useless_data(block_data: dict) -> dict:
     del block_data["block"]["last_commit"]["signatures"]
 
     # remove useless events for us
+    # Likely not used anymore since I am not subscribing
     # del block_data["events"]["commission.amount"]
     # del block_data["events"]["commission.validator"]
     # del block_data["events"]["rewards.amount"]
