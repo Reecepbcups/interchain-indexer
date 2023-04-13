@@ -171,7 +171,7 @@ async def main():
         # start = 7_299_000  # original 6_700_000
         # I need to get these blocks again in the future: 7_299_000 -> 7408700
 
-        start = 7408700
+        start = 7_417_100
 
         if start <= last_downloaded:
             start = last_downloaded
@@ -211,7 +211,8 @@ async def main():
                 # print(f"early return on purpose for testing"); exit(1)
 
         print("Finished")
-        time.sleep(6)
+        time.sleep(6)        
+        exit(1)
 
 
 def save_values_to_sql(values: list[dict]):
