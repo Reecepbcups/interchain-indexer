@@ -184,6 +184,7 @@ async def main():
 
         # Runs through groups for downloading from the RPC
         async with httpx.AsyncClient() as httpx_client:
+            # TODO Move to concurrent.futures.ThreadPoolExecutor?
             with multiprocessing.Pool(CPU_COUNT) as pool:
                 for i in range((end - start) // GROUPING + 1):
                     tasks = {}
@@ -197,6 +198,8 @@ async def main():
 
                     # This should never happen, just a precaution
                     try:
+                        # TODO move to asyncio.as_completed to yield as they complete. Then save
+                        # If so, change tasks[block] to asyncio.ensure_future(download_block...)
                         values = await asyncio.gather(*tasks.values())
                         save_values_to_sql(values)
                     except Exception as e:
