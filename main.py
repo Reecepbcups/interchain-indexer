@@ -169,7 +169,7 @@ async def main():
         # start = 7_299_000  # original 6_700_000
         # I need to get these blocks again in the future: 7_299_000 -> 7408700
 
-        start = 7_446_500
+        start = 7_484_000
 
         if start <= last_downloaded:
             start = last_downloaded
