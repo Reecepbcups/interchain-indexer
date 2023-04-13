@@ -7,3 +7,5 @@ data.db
 
 data*.db
 *.db-journal
+
+errors/

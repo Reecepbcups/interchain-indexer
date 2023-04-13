@@ -173,7 +173,6 @@ async def main():
 
         start = 7408700
 
-
         if start <= last_downloaded:
             start = last_downloaded
 
@@ -198,7 +197,7 @@ async def main():
                 # This should never happen, just a precaution
                 try:
                     values = await asyncio.gather(*tasks.values())
-                    save_values_to_sql(values)                    
+                    save_values_to_sql(values)
                 except Exception as e:
                     print(e)
                     print("Error in tasks")
