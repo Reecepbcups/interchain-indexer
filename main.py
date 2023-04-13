@@ -47,8 +47,8 @@ current_dir = os.path.dirname(os.path.realpath(__file__))
 # We will index for each user after we index everything entirely using get_sender & iterating all Txs.
 # Then we can add this as a default in the future. See notes in SQL.py
 
-errors = os.path.join(current_dir, "errors")
-os.makedirs(errors, exist_ok=True)
+errors_dir = os.path.join(current_dir, "errors")
+
 
 '''
 # Later we can decode
@@ -99,16 +99,18 @@ async def download_block(client: httpx.AsyncClient, pool, height: int) -> dict |
 
     # Note sure if this is a limiting factor or not as we add?
     # May not be possible with async
-    if db.get_block_txs(height) != None:
+    if db.get_block(height) != None:
         print(f"Block {height} is already downloaded & saved in SQL")
         return None
 
-    # Query block with client        
+    # Query block with client       
     RPC_ARCHIVE_URL = random.choice(RPC_ARCHIVE_LINKS)
     r = await client.get(f"{RPC_ARCHIVE_URL}/block?height={height}", timeout=30)
     if r.status_code != 200:
+        os.makedirs(errors_dir, exist_ok=True)
+
         print(f"Error: {r.status_code} @ height {height}")
-        with open(os.path.join(errors, f"{height}.json"), "w") as f:
+        with open(os.path.join(errors_dir, f"{height}.json"), "w") as f:
             f.write(r.text)
         return None
 
@@ -120,7 +122,7 @@ async def download_block(client: httpx.AsyncClient, pool, height: int) -> dict |
         block_time = v["header"]["time"] # 2023-04-13T17:46:31.898429796Z
         encoded_block_txs = v["data"]["txs"] # ["amino1"]
     except KeyError:
-        pass
+        return None
 
     # return stage_block_return_values_format(height, decoded_txs=decoded_txs)
     return {
@@ -139,10 +141,13 @@ async def main():
 
         latest = db.get_latest_saved_block_height()
         print(latest)
-        txs_in_block = db.get_block_txs(latest)
-        print("txs_in_block", txs_in_block)
-        tx = db.get_tx_amino(txs_in_block[-1])
-        print(tx)
+
+        block = db.get_block(latest-1)        
+        print("txs_in_block", block.tx_ids)
+        print("time", block.time)
+        # tx = db.get_tx_amino(block.tx_ids[-1])
+        # print(tx)
+
         pass
         exit(1)
 
@@ -156,7 +161,7 @@ async def main():
         )
 
         # Doing later so I can test against multiple PRs
-        start = 7_750_000
+        start = 7_000_000
 
         if start <= last_downloaded:
             start = last_downloaded

@@ -1,29 +1,10 @@
 import json
 import sqlite3
+from dataclasses import dataclass
 
 '''
-        # Create users table. We will do this later after we index, then decode & get addresses set
-        # self.cur.execute(
-        #     """CREATE TABLE IF NOT EXISTS users (
-        #         address text,
-        #         height integer not null,
-        #         tx_id integer
-        #     )"""
-        # )
 
-        # create a message types table
-        # set this as the pimray key?
-        # Do this later in the decoding stage
-        # self.cur.execute(
-        #     """CREATE TABLE IF NOT EXISTS messages (
-        #         message text not null,
-        #         height integer not null,
-        #         count integer not null
-        #     )"""
-        # )
-
-
-            def insert_type_count(self, msg_type: str, count: int, height: int):
+        def insert_type_count(self, msg_type: str, count: int, height: int):
         # NOTE: This needed? - check if height already has this height
         self.cur.execute(
             """SELECT height FROM messages WHERE height=? AND message=?""",
@@ -151,6 +132,17 @@ def _get_transactions_Msg_Types(self, tx: dict) -> list[str]:
         return res
 '''
 
+# create a dataclass for Block
+
+@dataclass
+class Block:
+    height: int
+    time: str
+    tx_ids: list[int]
+
+    def to_json(self) -> str:
+        return json.dumps(self.__dict__)
+
 class Database:
     def __init__(self, db: str):
         self.conn = sqlite3.connect(db)
@@ -173,6 +165,9 @@ class Database:
         self.cur.execute(
             """CREATE TABLE IF NOT EXISTS txs (id INTEGER PRIMARY KEY AUTOINCREMENT, height INTEGER, tx_amino TEXT, msg_types TEXT, tx_json TEXT)"""
         )
+
+        # users: address, height, tx_id
+        # messages: message_type, height, count
         
 
         self.commit()
@@ -239,16 +234,21 @@ class Database:
         found_heights = set(x[0] for x in data)
         missing_heights = [height for height in range(start_height, end_height+1) if height not in found_heights]
         return missing_heights
-
-    def get_block_txs(self, height: int) -> list[int] | None:
+    
+    def get_block(self, block_height: int) -> Block | None:
         self.cur.execute(
-            """SELECT txs FROM blocks WHERE height=?""",
-            (height,),
+            """SELECT * FROM blocks WHERE height=?""",
+            (block_height,),
         )
-        data = self.cur.fetchone()
+        data = self.cur.fetchone()        
         if data is None:
             return None
-        return json.loads(data[0])
+        # return {
+        #     "height": data[0],
+        #     "time": data[1],
+        #     "txs": json.loads(data[2]),
+        # }
+        return Block(data[0], data[1], json.loads(data[2]))
 
     def get_latest_saved_block_height(self) -> int:
         self.cur.execute("""SELECT height FROM blocks ORDER BY height DESC LIMIT 1""")
