@@ -31,9 +31,7 @@ class Database:
         )
 
         # Create txs table
-        # ! NOTE: Should add what type of tx it is here as well. Ex: /cosmwasm.wasm.v1.MsgExecuteContract
-        # So it will be easier to query for specific types of txs in a range?
-        # maybe also add the height here as well?
+        # NOTE: Add Height, & a MsgTypes array (Can be multiple)
         self.cur.execute(
             """CREATE TABLE IF NOT EXISTS txs (
                 id integer PRIMARY KEY,
@@ -98,6 +96,16 @@ class Database:
         # self.conn.commit()
 
     def insert_type_count(self, msg_type: str, count: int, height: int):
+        # NOTE: This needed? - check if height already has this height
+        self.cur.execute(
+            """SELECT height FROM messages WHERE height=? AND message=?""",
+            (height, msg_type),
+        )
+        data = self.cur.fetchone()
+        if data is not None:
+            print(f"Block {height} already has {msg_type}")
+            return
+
         self.cur.execute(
             """INSERT INTO messages (message, height, count) VALUES (?, ?, ?)""",
             (msg_type, height, count),
@@ -121,26 +129,35 @@ class Database:
             return 0
         return data[0]
 
-    def get_type_count_over_range(
-        self, msg_type: str, start: int, end: int
-    ) -> list[int]:
-        '''
+    def get_msgs_over_range(self, msg_type: str, start: int, end: int) -> list[int]:
+        """
+        If msg_type is '*' or None or blank, counts all messages
         Returns a list of @ of Txs per block in the range requested
 
         Ex: Blocks 10 through 20
         Returns a list of 10 items, each item being the # of txs total
-        '''
-        self.cur.execute(
-            """SELECT count FROM messages WHERE message=? AND height>=? AND height<=?""",
-            (msg_type, start, end),
-        )
+        """
+
+        if msg_type == "*" or msg_type == "" or msg_type is None:
+            self.cur.execute(
+                """SELECT count FROM messages WHERE height>=? AND height<=?""",
+                (start, end),
+            )
+        else:
+            self.cur.execute(
+                """SELECT count FROM messages WHERE message=? AND height>=? AND height<=?""",
+                (msg_type, start, end),
+            )
+
         data = self.cur.fetchall()
         if data is None:
             return []
         return [x[0] for x in data]
-    
-    def get_types_at_height_over_range(self, msg_type: str, start_height: int, end_height: int) -> list[int]:
-        # Retuns a list of every height said msg_type is found. Ex: [6700000, 6700001, 6700002, 6700005, 6700007, ...]        
+
+    def get_types_at_height_over_range(
+        self, msg_type: str, start_height: int, end_height: int
+    ) -> list[int]:
+        # Retuns a list of every height said msg_type is found. Ex: [6700000, 6700001, 6700002, 6700005, 6700007, ...]
         self.cur.execute(
             """SELECT height FROM messages WHERE message=? AND height>=? AND height<=?""",
             (msg_type, start_height, end_height),
@@ -148,31 +165,63 @@ class Database:
         data = self.cur.fetchall()
         if data is None:
             return []
-                
+
         return list(set([x[0] for x in data]))
 
-    def get_types_transaction_ids(self, msg_type: str, start_height: int, end_height: int) -> list[int]:
-        # Return a list of transaction ids from the Txs table, if its a msg_type & in the range of start and end
-        self.cur.execute(
-            """SELECT tx_id FROM users WHERE address=? AND height>=? AND height<=?""",
-            (msg_type, start_height, end_height),
-        )
-        data = self.cur.fetchall()
-        if data is None:
+    def _get_transactions_Msg_Types(self, tx: dict) -> list[str]:
+        if tx is None or tx == {}:
             return []
-        return [x[0] for x in data]
 
+        messages = set()
 
-    def get_all_message_count_over_range(self, start: int, end: int) -> list[int]:
-        self.cur.execute(
-            """SELECT count FROM messages WHERE height>=? AND height<=?""",
-            (start, end),
+        for msg in tx["body"]["messages"]:
+            _type = msg["@type"]
+            messages.add(_type)
+
+        return list(messages)
+
+    # If I saved it properly, would be a lot better
+    def get_msg_ids_in_range(
+        self, msg_type: str, start_height: int, end_height: int
+    ) -> list[int]:
+        # loop through all blocks in the range
+        found_heights = self.get_types_at_height_over_range(
+            msg_type, start_height, end_height
         )
-        data = self.cur.fetchall()
-        if data is None:
-            return []
-        return [x[0] for x in data]
-    
+
+        # get each one of those Txs from the database.
+        tx_ids = set()
+        for height in found_heights:
+            # query height for all transactions
+            self.cur.execute(
+                """SELECT txs FROM blocks WHERE height=?""",
+                (height,),
+            )
+            blocks_txs = self.cur.fetchone()
+            if blocks_txs is None:
+                continue
+
+            blocks_txs = json.loads(blocks_txs[0])
+            for tx_id in blocks_txs:
+                # query what type of message this tx is
+                self.cur.execute(
+                    """SELECT tx FROM txs WHERE id=?""",
+                    (tx_id,),
+                )
+                tx_data = self.cur.fetchone()
+                if tx_data is None:
+                    continue
+
+                tx_data = json.loads(tx_data[0])
+                print(tx_data)
+                msg_types = self._get_transactions_Msg_Types(tx_data)
+                if msg_type in msg_types:
+                    tx_ids.add(tx_id)
+
+        res = list(tx_ids)
+        res.sort()
+        return res
+
     def get_earliest_block_height(self) -> int:
         self.cur.execute("""SELECT height FROM blocks ORDER BY height ASC LIMIT 1""")
         data = self.cur.fetchone()
@@ -201,7 +250,7 @@ class Database:
         self.cur.execute("""SELECT height FROM blocks ORDER BY height DESC LIMIT 1""")
         data = self.cur.fetchone()
         if data is None:
-            return -1
+            return 0
         return data[0]
 
     def get_tx(self, tx_id: int) -> dict:
@@ -213,7 +262,6 @@ class Database:
         if data is None:
             return {}
         return json.loads(data[0])
-
 
     # TODO: Will process this after the fact
     def get_user_tx_ids(self, address: str) -> list[int]:
