@@ -6,6 +6,19 @@ import httpx
 
 current_dir = os.path.dirname(os.path.realpath(__file__))
 
+COSMOS_BINARY_FILE = "juno-decode"
+def run_decode_single_async(tx: str) -> dict:
+    # TODO: replace this with proto in the future?
+    # We run in a pool for better performance
+    # check for max len tx (store code breaks this for CLI usage on linux)
+    if len(tx) > 32766:
+        # Store codes
+        # print("TX too long. Skipping...")
+        return {}
+
+    res = os.popen(f"{COSMOS_BINARY_FILE} tx decode {tx} --output json").read()
+    return json.loads(res)
+
 
 def get_sender(msg: dict, WALLET_PREFIX: str, VALOPER_PREFIX: str) -> str | None:
     keys = [

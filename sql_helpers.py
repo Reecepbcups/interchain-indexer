@@ -1,14 +1,20 @@
 # reads the SQLite file and shows you how to perform actions
 
+import json
 import os
 
 from SQL import Database
 
 current_dir = os.path.dirname(os.path.realpath(__file__))
 
-
 def main():
     db = Database(os.path.join(current_dir, "data.db"))
+
+    # Save missing to file
+    missing = db.get_missing_blocks(7_750_000, 7_750_900)
+    print('missing ' , missing)
+    # with open("missing.json", "w") as f:        
+    #     f.write(json.dumps(missing))
 
     total = db.get_total_blocks()
     print(f"Total Blocks: {total}")
@@ -19,13 +25,13 @@ def main():
     latest_height = db.get_latest_saved_block_height()
     print(f"Latest Block Height: {latest_height}")
 
-    total = db.get_msgs_over_range("*", earliest_block, latest_height)
-    print(f"Total Msgs: {sum(total):,}")
+    # total = db.get_msgs_over_range("*", earliest_block, latest_height)
+    # print(f"Total Msgs: {sum(total):,}")
 
-    type_count = db.get_msgs_over_range(
-        "/cosmwasm.wasm.v1.MsgExecuteContract", earliest_block, latest_height
-    )
-    print(f"Total ExecuteContract: {sum(type_count):,}")
+    # type_count = db.get_msgs_over_range(
+    #     "/cosmwasm.wasm.v1.MsgExecuteContract", earliest_block, latest_height
+    # )
+    # print(f"Total ExecuteContract: {sum(type_count):,}")
 
     # values = db.get_types_at_height_over_range("/cosmwasm.wasm.v1.MsgExecuteContract", earliest_block, latest_height)
     # print(len(values))\
@@ -38,11 +44,11 @@ def main():
     # TODO: Get which heights blocks are at
 
     # # get the transactions at this height
-    # txs = db.get_block_txs(latest_height)
-    # print(f"Transactions at height {latest_height}: {txs}")
-    # # show the first tx in the txs list
-    # tx = db.get_tx(txs[0])
-    # print(f"First Transaction: {tx}")
+    txs = db.get_block_txs(latest_height)
+    print(f"Transactions at height {latest_height}: {txs}")
+    # show the first tx in the txs list
+    tx = db.get_tx_amino(txs[0])
+    print(f"First Transaction: {tx}")
 
 
 if __name__ == "__main__":

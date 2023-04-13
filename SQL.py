@@ -1,85 +1,29 @@
 import json
 import sqlite3
 
-
-class Database:
-    def __init__(self, db: str):
-        self.conn = sqlite3.connect(db)
-        self.cur = self.conn.cursor()
-
-    def commit(self):
-        self.conn.commit()
-
-    def create_tables(self):
-        # Blocks: contains height and a list of integer ids
-        # Txs: a list of unique integer ids and a string of the tx. Where Txs = a JSON array
-        # Users a list of unique addresses and a list of integer ids
-
-        # Create blocks table
-        self.cur.execute(
-            """CREATE TABLE IF NOT EXISTS blocks (
-                height integer PRIMARY KEY not null,
-                txs text
-            )"""
-        )
-
-        # Create txs table
-        # NOTE: Add Height, & a MsgTypes array (Can be multiple)
-        self.cur.execute(
-            """CREATE TABLE IF NOT EXISTS txs (
-                id integer PRIMARY KEY,
-                tx text
-            )"""
-        )
-
-        # Create users table
-        self.cur.execute(
-            """CREATE TABLE IF NOT EXISTS users (
-                address text,
-                height integer not null,
-                tx_id integer
-            )"""
-        )
+'''
+        # Create users table. We will do this later after we index, then decode & get addresses set
+        # self.cur.execute(
+        #     """CREATE TABLE IF NOT EXISTS users (
+        #         address text,
+        #         height integer not null,
+        #         tx_id integer
+        #     )"""
+        # )
 
         # create a message types table
         # set this as the pimray key?
-        self.cur.execute(
-            """CREATE TABLE IF NOT EXISTS messages (
-                message text not null,
-                height integer not null,
-                count integer not null
-            )"""
-        )
+        # Do this later in the decoding stage
+        # self.cur.execute(
+        #     """CREATE TABLE IF NOT EXISTS messages (
+        #         message text not null,
+        #         height integer not null,
+        #         count integer not null
+        #     )"""
+        # )
 
-        self.commit()
 
-    def get_all_tables(self):
-        self.cur.execute("""SELECT name FROM sqlite_master WHERE type='table';""")
-        return self.cur.fetchall()
-
-    def get_table_schema(self, table: str):
-        self.cur.execute(f"""PRAGMA table_info({table})""")
-        return self.cur.fetchall()
-
-    def insert_tx(self, tx_data: dict) -> int:
-        data = json.dumps(tx_data)
-        self.cur.execute(
-            """INSERT INTO txs (tx) VALUES (?)""",
-            (data,),
-        )
-        # self.conn.commit()
-
-        return self.cur.lastrowid or -1
-
-    def insert_block(self, height: int, txs: list[int]):
-        data = json.dumps(txs)
-        self.cur.execute(
-            """INSERT INTO blocks (height, txs) VALUES (?, ?)""",
-            (height, data),
-        )
-        # self.conn.commit()
-
-    def insert_type_count(self, msg_type: str, count: int, height: int):
+            def insert_type_count(self, msg_type: str, count: int, height: int):
         # NOTE: This needed? - check if height already has this height
         self.cur.execute(
             """SELECT height FROM messages WHERE height=? AND message=?""",
@@ -152,7 +96,7 @@ class Database:
 
         return list(set([x[0] for x in data]))
 
-    def _get_transactions_Msg_Types(self, tx: dict) -> list[str]:
+def _get_transactions_Msg_Types(self, tx: dict) -> list[str]:
         if tx is None or tx == {}:
             return []
 
@@ -205,6 +149,68 @@ class Database:
         res = list(tx_ids)
         res.sort()
         return res
+'''
+
+class Database:
+    def __init__(self, db: str):
+        self.conn = sqlite3.connect(db)
+        self.cur = self.conn.cursor()
+
+    def commit(self):
+        self.conn.commit()
+
+    def create_tables(self):
+        # Blocks: contains height and a list of integer ids
+        # Txs: a list of unique integer ids and a string of the tx. Where Txs = a JSON array
+        # Users a list of unique addresses and a list of integer ids
+
+        # height, time, txs_ids
+        self.cur.execute(
+            """CREATE TABLE IF NOT EXISTS blocks (height INTEGER PRIMARY KEY, time TEXT, txs TEXT)"""
+        )
+
+        # txs: id int primary key auto inc, height, tx_amino, msg_types, tx_json
+        self.cur.execute(
+            """CREATE TABLE IF NOT EXISTS txs (id INTEGER PRIMARY KEY AUTOINCREMENT, height INTEGER, tx_amino TEXT, msg_types TEXT, tx_json TEXT)"""
+        )
+        
+
+        self.commit()
+
+    def get_all_tables(self):
+        self.cur.execute("""SELECT name FROM sqlite_master WHERE type='table';""")
+        return self.cur.fetchall()
+
+    def get_table_schema(self, table: str):
+        self.cur.execute(f"""PRAGMA table_info({table})""")
+        return self.cur.fetchall()
+
+    def insert_tx(self, height: int, tx_amino: str):
+        # We insert the data without it being decoded. We can update later 
+        # insert the height and tx_amino, then return the unique id
+        # fill the other collums with empty strings
+        self.cur.execute(
+            """INSERT INTO txs (height, tx_amino, msg_types, tx_json) VALUES (?, ?, ?, ?)""",
+            (height, tx_amino, "", ""),
+        )
+        return self.cur.lastrowid
+    
+    # def update_tx(self, id: int, tx_json: str, msg_types: str):
+    #     # update the data after we decode it (post insert_tx)
+    #     self.cur.execute(
+    #         """UPDATE txs SET tx_json=?, msg_types=? WHERE id=?""",
+    #         (tx_json, msg_types, id),
+    #     )        
+    #     return self.cur.lastrowid
+
+    def insert_block(self, height: int, time: str, txs_ids: list[int]):
+        # insert the height and tx_amino, then return the unique id
+        self.cur.execute(
+            """INSERT INTO blocks (height, time, txs) VALUES (?, ?, ?)""",
+            (height, time, json.dumps(txs_ids)),
+        )
+        return self.cur.lastrowid
+    
 
     def get_earliest_block_height(self) -> int:
         self.cur.execute("""SELECT height FROM blocks ORDER BY height ASC LIMIT 1""")
@@ -219,6 +225,20 @@ class Database:
         if data is None:
             return 0
         return data[0]
+    
+    def get_missing_blocks(self, start_height, end_height) -> list[int]:
+        # get all blocks which we do not have value for between a range
+        self.cur.execute(
+            """SELECT height FROM blocks WHERE height>=? AND height<=?""",
+            (start_height, end_height),
+        )
+        data = self.cur.fetchall()
+        if data is None:
+            return []
+        
+        found_heights = set(x[0] for x in data)
+        missing_heights = [height for height in range(start_height, end_height+1) if height not in found_heights]
+        return missing_heights
 
     def get_block_txs(self, height: int) -> list[int] | None:
         self.cur.execute(
@@ -237,43 +257,45 @@ class Database:
             return 0
         return data[0]
 
-    def get_tx(self, tx_id: int) -> dict:
+    def get_tx_amino(self, tx_id: int) -> str:
         self.cur.execute(
-            """SELECT tx FROM txs WHERE id=?""",
+            """SELECT tx_amino FROM txs WHERE id=?""",
             (tx_id,),
         )
         data = self.cur.fetchone()
         if data is None:
-            return {}
-        return json.loads(data[0])
-
+            return ""
+        return data[0]
+    
+    # get_tx_json ,_ need to write a mass decode script
+    
     # TODO: Will process this after the fact
-    def get_user_tx_ids(self, address: str) -> list[int]:
-        # get all Tx ids for a given address
-        self.cur.execute(
-            """SELECT tx_id FROM users WHERE address=?""",
-            (address,),
-        )
-        data = self.cur.fetchall()
-        if data is None:
-            return []
+    # def get_user_tx_ids(self, address: str) -> list[int]:
+    #     # get all Tx ids for a given address
+    #     self.cur.execute(
+    #         """SELECT tx_id FROM users WHERE address=?""",
+    #         (address,),
+    #     )
+    #     data = self.cur.fetchall()
+    #     if data is None:
+    #         return []
 
-        return [tx_id[0] for tx_id in data]
+    #     return [tx_id[0] for tx_id in data]
 
-    def get_user_txs(self, address: str) -> dict:
-        tx_ids = self.get_user_tx_ids(address)
-        txs = {}
-        for tx_id in tx_ids:
-            tx = self.get_tx(tx_id)
-            txs[tx_id] = tx
-        return txs
+    # def get_user_txs(self, address: str) -> dict:
+    #     tx_ids = self.get_user_tx_ids(address)
+    #     txs = {}
+    #     for tx_id in tx_ids:
+    #         tx = self.get_tx(tx_id)
+    #         txs[tx_id] = tx
+    #     return txs
 
-    def get_all_accounts(self) -> list[str]:
-        # return all accounts and the len of txs they have
-        self.cur.execute(
-            """SELECT address, COUNT(tx_id) FROM users GROUP BY address""",
-        )
-        data = self.cur.fetchall()
-        if data is None:
-            return []
-        return data
+    # def get_all_accounts(self) -> list[str]:
+    #     # return all accounts and the len of txs they have
+    #     self.cur.execute(
+    #         """SELECT address, COUNT(tx_id) FROM users GROUP BY address""",
+    #     )
+    #     data = self.cur.fetchall()
+    #     if data is None:
+    #         return []
+    #     return data
