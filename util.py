@@ -46,13 +46,19 @@ def get_block_txs(block_data: dict) -> list:
 
 
 def get_latest_chain_height(RPC_ARCHIVE: str) -> int:
+    r = httpx.get(f"{RPC_ARCHIVE}/abci_info?")
+
+    if r.status_code != 200:
+        # TODO: backup RPC?
+        print(
+            f"Error: get_latest_chain_height status_code: {r.status_code} @ {RPC_ARCHIVE}. Exiting..."
+        )
+        exit(1)
+
     current_height = (
-        httpx.get(f"{RPC_ARCHIVE}/abci_info?")
-        .json()
-        .get("result", {})
-        .get("response", {})
-        .get("last_block_height", "-1")
+        r.json().get("result", {}).get("response", {}).get("last_block_height", "-1")
     )
+
     print(f"Current Height: {current_height}")
 
     return int(current_height)
