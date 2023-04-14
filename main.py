@@ -215,31 +215,65 @@ def decode_and_save_updated(to_decode: list[dict]):
 def do_decode(lowest_height: int, highest_height: int):
     global db
 
-    txs = db.get_txs_in_range(lowest_height, highest_height)
-    print(f"Total Txs in this range: {len(txs)}")
+    # make this into groups of 10_000 blocks
+    groups = []
+    BLOCKS_GROUPING = 5_000
 
-    # Get what Txs we need to decode for the custom -decode binary
-    to_decode = []
-    for tx in txs:
-        if len(tx.tx_json) != 0:
-            continue
+    if highest_height - lowest_height <= BLOCKS_GROUPING:
+        groups.append(
+            {
+                "start": lowest_height,
+                "end": highest_height,
+            }
+        )
+    else:
+        for i in range((highest_height - lowest_height) // BLOCKS_GROUPING + 1):
+            groups.append(
+                {
+                    "start": lowest_height + i * BLOCKS_GROUPING,
+                    "end": lowest_height + (i + 1) * BLOCKS_GROUPING,
+                }
+            )
+        # add the final group as the difference
+        if groups[-1]["end"] < highest_height:
+            groups.append(
+                {
+                    "start": groups[-1]["end"],
+                    "end": highest_height,
+                }
+            )
 
-        # ignore storecode
-        if len(tx.tx_amino) > 30_000:
-            continue
+    for group in groups:
+        print(f"Decoding group: {group['start']} -> {group['end']}")
+        start_height = group["start"]
+        end_height = group["end"]
+        # print(f"Decoding {start_height} -> {end_height}")
 
-        to_decode.append({"id": tx.id, "tx": tx.tx_amino})
+        txs = db.get_txs_in_range(start_height, end_height)
+        print(f"Total Txs in this range: {len(txs)}")
 
-        if len(to_decode) >= DECODE_LIMIT:
-            # early decode if too many Txs
+        # Get what Txs we need to decode for the custom -decode binary
+        to_decode = []
+        for tx in txs:
+            if len(tx.tx_json) != 0:
+                continue
+
+            # ignore storecode
+            if len(tx.tx_amino) > 30_000:
+                continue
+
+            to_decode.append({"id": tx.id, "tx": tx.tx_amino})
+
+            if len(to_decode) >= DECODE_LIMIT:
+                # early decode if too many Txs
+                decode_and_save_updated(to_decode)
+                to_decode.clear()
+                db.commit()
+
+        if len(to_decode) > 0:
             decode_and_save_updated(to_decode)
             to_decode.clear()
             db.commit()
-
-    if len(to_decode) > 0:
-        decode_and_save_updated(to_decode)
-        to_decode.clear()
-        db.commit()
 
 
 def save_values_to_sql(values: list[BlockData]):
@@ -286,7 +320,6 @@ if __name__ == "__main__":
                 START_BLOCK, END_BLOCK
             )
         )
-        time.sleep(2)
         do_decode(START_BLOCK, END_BLOCK)
         exit(1)
 
