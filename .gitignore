@@ -1,3 +1,12 @@
 blocks/*.json
-latest_height.txt
 __pycache__/
+
+data.db
+*_error.txt
+
+data*.db
+*.db-journal
+
+errors/
+
+*.json
