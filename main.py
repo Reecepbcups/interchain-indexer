@@ -277,6 +277,7 @@ def save_values_to_sql(values: list[BlockData]):
 
 if __name__ == "__main__":
     db = Database(os.path.join(current_dir, "data.db"))
+    db.optimize_tables()
     db.create_tables()
 
     if TASK == "decode":

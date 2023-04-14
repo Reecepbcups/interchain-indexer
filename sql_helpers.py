@@ -23,7 +23,7 @@ def main():
     print(f"Latest Block Height: {latest_block.height}")
 
     # get total Txs
-    total_txs = db.get_txs_in_range(earliest_block.height, latest_block.height)
+    total_txs = db.get_txs_in_range(earliest_block.height, earliest_block.height+100_000)
     print(f"Total Txs: {len(total_txs):,}")
     exit(1)
 

@@ -37,6 +37,30 @@ class Database:
 
         self.commit()
 
+    def optimize_tables(self):
+        # CREATE INDEX tag_titles ON tags (title);
+        # self.cur.execute("""VACUUM""")
+
+        # for blocks, create an index at height
+        self.cur.execute("""CREATE INDEX IF NOT EXISTS blocks_height ON blocks (height)""")
+
+        # index txs by id & height
+        self.cur.execute(
+            """CREATE INDEX IF NOT EXISTS txs_id_height ON txs (id, height)"""
+        )  
+
+        # index messages by height
+        self.cur.execute("""CREATE INDEX IF NOT EXISTS messages_height ON messages (height)""")
+
+        # index users by height
+        self.cur.execute("""CREATE INDEX IF NOT EXISTS users_height ON users (height)""")
+
+        self.commit()
+
+    def get_indexes(self):
+        self.cur.execute("""SELECT name FROM sqlite_master WHERE type='index';""")
+        return self.cur.fetchall()
+
     def get_all_tables(self):
         self.cur.execute("""SELECT name FROM sqlite_master WHERE type='table';""")
         return self.cur.fetchall()
@@ -255,15 +279,27 @@ class Database:
         if end_height > latest_block.height:
             end_height = latest_block.height
 
+        # select * from txs between height ordering by assending
         self.cur.execute(
-            """SELECT * FROM txs WHERE height BETWEEN ? AND ?""",
+            """SELECT * FROM txs WHERE height>=? AND height<=? ORDER BY height ASC""",
             (start_height, end_height),
         )
         data = self.cur.fetchall()
         if data is None:
             return []
 
-        return [Tx(x[0], x[1], x[2], x[3], x[4]) for x in data]
+        tx = Tx(0, 0, "", [], "")
+        txs: list[Tx] = []
+        for x in data:
+            tx.id = x[0]
+            tx.height = x[1]
+            tx.tx_amino = x[2]
+            tx.msg_types = x[3]
+            tx.tx_json = x[4]
+            txs.append(tx)
+
+        # return [Tx(x[0], x[1], x[2], x[3], x[4]) for x in data]
+        return txs
 
     def get_users_txs_in_range(
         self, address: str, start_height: int, end_height: int
