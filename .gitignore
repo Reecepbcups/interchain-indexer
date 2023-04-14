@@ -10,6 +10,8 @@ data*.db
 *.db-*
 *.db-journal
 
+# 
+errors.txt
 errors/
 tmp*.json
 
