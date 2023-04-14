@@ -6,67 +6,76 @@ Flow:
 - Then have every X blocks maybe, call an SQL method sync which takes all the saved JSON and loads it insert
 - There is a LOT of disk IO with this approach. I just do not feel like making SQLite async right now
 """
-# TODO: save Tx types to a table over time
 
 import asyncio
 import json
+import logging
 import os
 import random
+import sys
 import time
 import traceback
 
 import httpx
-from dotenv import load_dotenv
 
 from chain_types import BlockData
 from SQL import Database
 from util import command_exists, get_latest_chain_height, get_sender, run_decode_file
 
-load_dotenv()
+current_dir = os.path.dirname(os.path.realpath(__file__))
 
-# ==== CONFIGURATION (.ENV) ====
-START_BLOCK = int(os.getenv("START_BLOCK", -1))
-END_BLOCK = int(os.getenv("END_BLOCK", -1))
-GROUPING = int(os.getenv("GROUPING", 100))
+with open(os.path.join(current_dir, "chain_config.json"), "r") as f:
+    chain_config = dict(json.load(f))
 
-# if start or stop are below 0, error and exit
-if START_BLOCK < 0 or END_BLOCK < 0:
-    print("START_BLOCK or END_BLOCK is below 0")
+if len(sys.argv) < 2:
+    print(f"Please specify a key: {chain_config.get('sections', {}).keys()}")
     exit(1)
-
-# download, decode, and both (when synced fully)
-TASK = os.getenv("TASK", "not_set")
-if TASK == "not_set":
-    print("TASK not set in .env file")
-    exit(1)
-
-
-rpc_links: str = os.getenv("RPC_NODES", "")
-if rpc_links.endswith(","):
-    rpc_links = rpc_links[:-1]
-
-RPC_ARCHIVE_LINKS: list[str] = rpc_links.split(",")
-if len(RPC_ARCHIVE_LINKS) == 0:
-    print("No RPC nodes found in .env file")
-    exit(1)
+chain_section_key = sys.argv[1]
 
 # https://github.com/Reecepbcups/juno-decode
-COSMOS_PROTO_DECODER_BINARY_FILE = os.getenv(
-    "COSMOS_PROTO_DECODE_BINARY", "juno-decode"
-)
+COSMOS_PROTO_DECODER_BINARY_FILE = chain_config.get("COSMOS_PROTO_DECODE_BINARY", "juno-decode")
+DECODE_LIMIT = chain_config.get("COSMOS_PROTO_DECODE_LIMIT", 10_000)
 if not command_exists(COSMOS_PROTO_DECODER_BINARY_FILE):
     print(f"Command {COSMOS_PROTO_DECODER_BINARY_FILE} not found")
     exit(1)
 
-WALLET_PREFIX = os.getenv("WALLET_PREFIX", "juno1")
-VALOPER_PREFIX = os.getenv("VALOPER_PREFIX", "junovaloper1")
+# download, decode, and both (when synced fully)
+TASK = chain_config.get("TASK", "sync") 
+
+WALLET_PREFIX = chain_config.get("WALLET_PREFIX", 'juno1')
+VALOPER_PREFIX = chain_config.get("VALOPER_PREFIX", 'junovaloper1')
+
+specific_section: dict = chain_config.get('sections', {}).get(chain_section_key, {})
+if specific_section == {}:
+    print(f"Chain section {chain_section_key} not found")
+    exit(1)
+
+START_BLOCK = specific_section.get("start", -1)
+END_BLOCK = specific_section.get("end", -1)
+GROUPING = specific_section.get("grouping", 10_000)
+if START_BLOCK < 0 or END_BLOCK < 0:
+    print("START_BLOCK or END_BLOCK is not set correctly")
+    exit(1)
+RPC_ARCHIVE_LINKS: list[str] = specific_section.get("rpc_endpoints", [])
+if len(RPC_ARCHIVE_LINKS) == 0:
+    print(f"RPC_ARCHIVE_LINKS is empty")
+    exit(1)
+
+DUMPFILE = os.path.join(current_dir, "tmp-amino.json")
+OUTFILE = os.path.join(current_dir, "tmp-output.json")
+
+built_in_print = print
+def print(*args, **kwargs):
+    # logging.basicConfig(filename=os.path.join(current_dir, 'logs.log'), level=logging.DEBUG, format=f'%(asctime)s %(levelname)s thread:{chain_section_key} %(message)s')
+    # log = logging.getLogger(__name__)    
+    built_in_print(f'thread:{chain_section_key}', *args, **kwargs)
+print(f"Starting {TASK} task")
 
 
-current_dir = os.path.dirname(os.path.realpath(__file__))
-DUMPFILE = os.path.join(os.path.dirname(__file__), "tmp-amino.json")
-OUTFILE = os.path.join(os.path.dirname(__file__), "tmp-output.json")
-DECODE_LIMIT = 10_000
+## ==== LOGIC ==== ##
 
+# Initialized below
+db: Database
 
 async def download_block(client: httpx.AsyncClient, height: int) -> BlockData | None:
     if db.get_block(height) != None:

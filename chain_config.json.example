@@ -1,0 +1,42 @@
+{
+    "COSMOS_PROTO_DECODE_BINARY": "juno-decode",
+    "COSMOS_PROTO_DECODE_LIMIT": 10000,
+    "WALLET_PREFIX": "juno1",
+    "VALOPER_PREFIX": "junovaloper1",
+
+    "TASK": "download",
+    "sections": {
+        "0": {
+            "start": 0,
+            "end": 500000,
+            "grouping": 1000,
+            "rpc_endpoints": [
+                "https://rpc-v2-archive.junonetwork.io:443"
+            ]
+        },
+        "1": {
+            "start": 500000,
+            "end": 1000000,
+            "grouping": 1000,
+            "rpc_endpoints": [
+                "https://rpc-v2-archive.junonetwork.io:443"
+            ]
+        },
+        "2": {
+            "start": 1000000,
+            "end": 1500000,
+            "grouping": 1000,
+            "rpc_endpoints": [
+                "https://rpc-v2-archive.junonetwork.io:443"
+            ]
+        },
+        "3": {
+            "start": 1500000,
+            "end": 2578097,
+            "grouping": 1000,
+            "rpc_endpoints": [
+                "https://rpc-v2-archive.junonetwork.io:443"
+            ]
+        }
+    }
+}
