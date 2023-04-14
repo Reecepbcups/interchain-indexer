@@ -3,53 +3,6 @@ import sqlite3
 
 from chain_types import Block, Tx
 
-'''        
-
-
-
-    # If I saved it properly, would be a lot better
-    def get_msg_ids_in_range(
-        self, msg_type: str, start_height: int, end_height: int
-    ) -> list[int]:
-        # loop through all blocks in the range
-        found_heights = self.get_types_at_height_over_range(
-            msg_type, start_height, end_height
-        )
-
-        # get each one of those Txs from the database.
-        tx_ids = set()
-        for height in found_heights:
-            # query height for all transactions
-            self.cur.execute(
-                """SELECT txs FROM blocks WHERE height=?""",
-                (height,),
-            )
-            blocks_txs = self.cur.fetchone()
-            if blocks_txs is None:
-                continue
-
-            blocks_txs = json.loads(blocks_txs[0])
-            for tx_id in blocks_txs:
-                # query what type of message this tx is
-                self.cur.execute(
-                    """SELECT tx FROM txs WHERE id=?""",
-                    (tx_id,),
-                )
-                tx_data = self.cur.fetchone()
-                if tx_data is None:
-                    continue
-
-                tx_data = json.loads(tx_data[0])
-                # print(tx_data)
-                msg_types = self._get_transactions_Msg_Types(tx_data)
-                if msg_type in msg_types:
-                    tx_ids.add(tx_id)
-
-        res = list(tx_ids)
-        res.sort()
-        return res
-'''
-
 
 class Database:
     def __init__(self, db: str):
