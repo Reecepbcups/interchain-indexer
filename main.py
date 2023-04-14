@@ -21,11 +21,11 @@ from chain_types import BlockData
 from SQL import Database
 from util import get_latest_chain_height, get_sender, run_decode_file
 
-CPU_COUNT = multiprocessing.cpu_count()
-
+# ENV FILE
+START_BLOCK = 7_000_000
+END_BLOCK = 7_800_000
 GROUPING = 500  # 50-200 is good.
 
-# ENV FILE
 RPC_ARCHIVE_LINKS: list[str] = [
     "https://rpc-archive.junonetwork.io:443",
     # "https://rpc.juno.strange.love:443", # not archive, using for testing through
@@ -33,12 +33,13 @@ RPC_ARCHIVE_LINKS: list[str] = [
     # "https://juno-rpc.polkachu.com:443", # not archive, using for testing through
 ]
 
+# https://github.com/Reecepbcups/juno-decode
+COSMOS_PROTO_DECODER_BINARY_FILE = "juno-decode"
+
 WALLET_PREFIX = "juno1"
 VALOPER_PREFIX = "junovaloper1"
-WALLET_LENGTH = 43
+# WALLET_LENGTH = 43
 
-# junod works as well, this is just a lightweight decoder of it.
-COSMOS_BINARY_FILE = "juno-decode"  # https://github.com/Reecepbcups/juno-decoder
 
 current_dir = os.path.dirname(os.path.realpath(__file__))
 
@@ -46,12 +47,11 @@ DUMPFILE = os.path.join(os.path.dirname(__file__), "tmp-amino.json")
 OUTFILE = os.path.join(os.path.dirname(__file__), "tmp-output.json")
 
 
-async def download_block(client: httpx.AsyncClient, pool, height: int) -> BlockData | None:    
+async def download_block(client: httpx.AsyncClient, height: int) -> BlockData | None:    
     if db.get_block(height) != None:
         print(f"Block {height} is already downloaded & saved in SQL")
         return None
 
-    # Query block with client       
     RPC_ARCHIVE_URL = random.choice(RPC_ARCHIVE_LINKS)
     r = await client.get(f"{RPC_ARCHIVE_URL}/block?height={height}", timeout=30)
     if r.status_code != 200:        
@@ -77,48 +77,44 @@ async def download_block(client: httpx.AsyncClient, pool, height: int) -> BlockD
 
 
 async def main():
+    global START_BLOCK, END_BLOCK
+
     # while loop, every 6 seconds query the RPC for latest and download.
     while True:
         last_saved: int = db.get_latest_saved_block().height
         current_chain_height = get_latest_chain_height(RPC_ARCHIVE=RPC_ARCHIVE_LINKS[0])        
         print(f"Chain height: {current_chain_height:,}. Last saved: {last_saved:,}")                
-
-        start = 7_000_000
-        end = 7_800_000
-
-        if start <= last_saved:
-            start = last_saved
-        if end > current_chain_height:
-            end = current_chain_height
+                
+        if END_BLOCK > current_chain_height:
+            END_BLOCK = current_chain_height
 
         # ensure end is a multiple of grouping
-        end = current_chain_height - (current_chain_height % GROUPING)    
-        print(f"Download Spread: {(int(end) - start):,} blocks")
+        END_BLOCK = current_chain_height - (current_chain_height % GROUPING)    
+        print(f"Blocks: {START_BLOCK:,}->{END_BLOCK:,}. Download Spread: {(int(END_BLOCK) - START_BLOCK):,} blocks")        
 
         # Runs through groups for downloading from the RPC
         async with httpx.AsyncClient() as httpx_client:            
-            with multiprocessing.Pool(CPU_COUNT) as pool:
-                for i in range((end - start) // GROUPING + 1):
-                    tasks = {}
-                    start_time = time.time()
-                    for j in range(GROUPING):
-                        # block index from the grouping its in
-                        block = start + i * GROUPING + j
-                        tasks[block] = asyncio.create_task(download_block(httpx_client, pool, block))                    
+            # with multiprocessing.Pool(multiprocessing.cpu_count()) as pool:
+            for i in range((END_BLOCK - START_BLOCK) // GROUPING + 1):
+                tasks = {}
+                start_time = time.time()
+                for j in range(GROUPING):
+                    # block index from the grouping its in
+                    block = START_BLOCK + i * GROUPING + j
+                    tasks[block] = asyncio.create_task(download_block(httpx_client, block))                    
 
-                    # This should never happen, just a precaution. 
-                    # When this does happen nothing works (ex: node down, no binary to decode)
-                    try:
-                        values = await asyncio.gather(*tasks.values())
-                        save_values_to_sql(values)                                                
-                    except Exception as e:
-                        print(e)
-                        print("Error in tasks")
-                        continue                    
-                    
-                    print(
-                        f"Finished #{len(tasks)} blocks in {time.time() - start_time} seconds @ {start + i * GROUPING}"
-                    )
+                # This should never happen, just a precaution. 
+                # When this does happen nothing works (ex: node down, no binary to decode)
+                try:
+                    values = await asyncio.gather(*tasks.values())
+                    save_values_to_sql(values)                                                
+                except Exception as e:
+                    print(f"Erorr: main(): {e}")                    
+                    continue                    
+                
+                print(
+                    f"Finished #{len(tasks)} blocks in {time.time() - start_time} seconds @ {START_BLOCK + i * GROUPING}"
+                )
 
                     # print(f"early return on purpose for testing"); exit(1)
 
@@ -136,7 +132,7 @@ def decode_and_save_updated(db: Database, to_decode: list[dict]):
 
     # Decodes this file, and saves to the output file (from the chain-decoder binary)
     # Calls syncronously, since we handle so many decodes in 1 call.
-    values = run_decode_file(DUMPFILE, OUTFILE)
+    values = run_decode_file(COSMOS_PROTO_DECODER_BINARY_FILE, DUMPFILE, OUTFILE)
 
     for data in values:
         tx_id = data["id"]
