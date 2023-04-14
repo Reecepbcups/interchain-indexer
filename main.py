@@ -12,6 +12,7 @@ import asyncio
 import json
 import os
 import random
+import subprocess
 import time
 
 import httpx
@@ -19,7 +20,7 @@ from dotenv import load_dotenv
 
 from chain_types import BlockData
 from SQL import Database
-from util import get_latest_chain_height, get_sender, run_decode_file
+from util import command_exists, get_latest_chain_height, get_sender, run_decode_file
 
 load_dotenv()
 
@@ -35,7 +36,11 @@ if TASK == "not_set":
     exit(1)
 
 
-RPC_ARCHIVE_LINKS: list[str] = os.getenv("RPC_NODES", "").split(",")
+rpc_links: str = os.getenv("RPC_NODES", "")
+if rpc_links.endswith(","):
+    rpc_links = rpc_links[:-1]
+
+RPC_ARCHIVE_LINKS: list[str] = rpc_links.split(",")
 if len(RPC_ARCHIVE_LINKS) == 0:
     print("No RPC nodes found in .env file")
     exit(1)
@@ -44,6 +49,10 @@ if len(RPC_ARCHIVE_LINKS) == 0:
 COSMOS_PROTO_DECODER_BINARY_FILE = os.getenv(
     "COSMOS_PROTO_DECODE_BINARY", "juno-decode"
 )
+if not command_exists(COSMOS_PROTO_DECODER_BINARY_FILE):
+    print(f"Command {COSMOS_PROTO_DECODER_BINARY_FILE} not found")
+    exit(1)
+
 WALLET_PREFIX = os.getenv("WALLET_PREFIX", "juno1")
 VALOPER_PREFIX = os.getenv("VALOPER_PREFIX", "junovaloper1")
 
@@ -51,6 +60,7 @@ VALOPER_PREFIX = os.getenv("VALOPER_PREFIX", "junovaloper1")
 current_dir = os.path.dirname(os.path.realpath(__file__))
 DUMPFILE = os.path.join(os.path.dirname(__file__), "tmp-amino.json")
 OUTFILE = os.path.join(os.path.dirname(__file__), "tmp-output.json")
+DECODE_LIMIT = 10_000
 
 
 async def download_block(client: httpx.AsyncClient, height: int) -> BlockData | None:
@@ -105,8 +115,6 @@ async def main():
         print(
             f"Blocks: {START_BLOCK:,}->{END_BLOCK:,}. Download Spread: {(int(END_BLOCK) - START_BLOCK):,} blocks"
         )
-
-        # Runs through groups for downloading from the RPC
 
         # This is a list of list of tasks to do. Each task should be done on its own thread
         async with httpx.AsyncClient() as httpx_client:
@@ -188,7 +196,6 @@ def decode_and_save_updated(to_decode: list[dict]):
         # save users who sent the tx to the database for the users table
         db.insert_user(sender, height, tx_id)
 
-        # print(tx_id, tx_data, msg_types)
         db.update_tx(tx_id, json.dumps(tx_data), json.dumps(msg_types_list))
         # exit(1)
 
@@ -200,9 +207,6 @@ def decode_and_save_updated(to_decode: list[dict]):
     # os.remove(DUMPFILE)
     # os.remove(OUTFILE)
     pass
-
-
-DECODE_LIMIT = 10_000
 
 
 def do_decode(lowest_height: int, highest_height: int):
