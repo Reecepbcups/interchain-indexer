@@ -29,6 +29,11 @@ START_BLOCK = int(os.getenv("START_BLOCK", -1))
 END_BLOCK = int(os.getenv("END_BLOCK", -1))
 GROUPING = int(os.getenv("GROUPING", 100))
 
+# if start or stop are below 0, error and exit
+if START_BLOCK < 0 or END_BLOCK < 0:
+    print("START_BLOCK or END_BLOCK is below 0")
+    exit(1)
+
 # download, decode, and both (when synced fully)
 TASK = os.getenv("TASK", "not_set")
 if TASK == "not_set":
@@ -101,7 +106,6 @@ async def download_block(client: httpx.AsyncClient, height: int) -> BlockData | 
 async def main():
     global START_BLOCK, END_BLOCK
 
-    # while loop, every 6 seconds query the RPC for latest and download.
     while True:
         last_saved: int = db.get_latest_saved_block().height
         current_chain_height = get_latest_chain_height(RPC_ARCHIVE=RPC_ARCHIVE_LINKS[0])
