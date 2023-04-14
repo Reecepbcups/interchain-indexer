@@ -49,7 +49,8 @@ OUTFILE = os.path.join(os.path.dirname(__file__), "tmp-output.json")
 
 async def download_block(client: httpx.AsyncClient, height: int) -> BlockData | None:    
     if db.get_block(height) != None:
-        print(f"Block {height} is already downloaded & saved in SQL")
+        if height % 1000 == 0:
+            print(f"Block {height} is already downloaded & saved in SQL")
         return None
 
     RPC_ARCHIVE_URL = random.choice(RPC_ARCHIVE_LINKS)
@@ -106,7 +107,10 @@ async def main():
                 # This should never happen, just a precaution. 
                 # When this does happen nothing works (ex: node down, no binary to decode)
                 try:
-                    values = await asyncio.gather(*tasks.values())
+                    values = await asyncio.gather(*tasks.values())                    
+                    if all(x is None for x in values):
+                        continue
+
                     save_values_to_sql(values)                                                
                 except Exception as e:
                     print(f"Erorr: main(): {e}")                    
@@ -170,8 +174,8 @@ def decode_and_save_updated(db: Database, to_decode: list[dict]):
         # exit(1)
     
     db.commit()
-    end_time = time.time()
-    print(f"Time to decode & store ({len(to_decode)}): {end_time - start_time}")     
+    # end_time = time.time()
+    # print(f"Time to decode & store ({len(to_decode)}): {end_time - start_time}")     
         
     os.remove(DUMPFILE)
     os.remove(OUTFILE)
@@ -179,11 +183,11 @@ def decode_and_save_updated(db: Database, to_decode: list[dict]):
 
 
 def save_values_to_sql(values: list[BlockData]):        
-    values.sort(key=lambda x: x.height)
+    values.sort(key=lambda x: x.height if x is not None else 0)
 
     for bd in values:
         if bd == None:  # if we already downloaded or there was an error
-            continue
+            continue        
 
         height = bd.height
         block_time = bd.block_time
