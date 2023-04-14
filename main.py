@@ -14,21 +14,18 @@ import multiprocessing
 import os
 import random
 import time
-import uuid
-from dataclasses import dataclass
 
 import httpx
 
+from chain_types import BlockData
 from SQL import Database
-from util import (  # decode_txs,; decode_txs_async,; get_sender,; remove_useless_data,
-    get_block_txs,
-    get_latest_chain_height,
-)
+from util import get_latest_chain_height, get_sender, run_decode_file
 
 CPU_COUNT = multiprocessing.cpu_count()
 
-GROUPING = 200  # 50-200 is good.
+GROUPING = 500  # 50-200 is good.
 
+# ENV FILE
 RPC_ARCHIVE_LINKS: list[str] = [
     "https://rpc-archive.junonetwork.io:443",
     # "https://rpc.juno.strange.love:443", # not archive, using for testing through
@@ -44,60 +41,9 @@ WALLET_LENGTH = 43
 COSMOS_BINARY_FILE = "juno-decode"  # https://github.com/Reecepbcups/juno-decoder
 
 current_dir = os.path.dirname(os.path.realpath(__file__))
-
-# We will index for each user after we index everything entirely using get_sender & iterating all Txs.
-# Then we can add this as a default in the future. See notes in SQL.py
-
 errors_dir = os.path.join(current_dir, "errors")
 
 
-'''
-# Later we can decode
-decoded_txs: list[dict] = pool.map(run_decode_single_async, block_txs)    
-
-def stage_block_return_values_format(height: int, decoded_txs: list[dict] = []):
-    # decoded_txs = block_data["result"]["block"]["data"]["txs"]
-    msg_types: dict[str, int] = {}
-    tx: dict
-    txs: dict[int, dict] = {}
-    for tx in decoded_txs:        
-        try:
-            messages: list = tx["body"]["messages"]
-        except:
-            messages = []
-
-        for msg in messages:
-            msg_type = msg.get("@type")
-            if msg_type in msg_types.keys():
-                msg_types[msg_type] += 1
-            else:
-                msg_types[msg_type] = 1
-
-        # if ignore is in the string of the tx, continue
-        # Since we only ignore IBC msgs we can just skip the Tx for now.
-        if any(x in str(tx) for x in ignore):
-            continue
-
-        unique_id = uuid.uuid4().int
-        txs[unique_id] = tx
-
-    # DEBUGGING
-    if height % 10 == 0:
-        print(f"Block {height}: {len(txs.keys())} txs")
-
-    # We return the values we want to save in SQL per block
-    return {
-        "height": height,
-        "msg_types": msg_types,
-        "txs": txs,  # unique_id: json
-    }
-'''
-
-@dataclass
-class BlockData:
-    height: int
-    block_time: str
-    encoded_txs: list[str]
 
 
 async def download_block(client: httpx.AsyncClient, pool, height: int) -> BlockData | None:
@@ -163,7 +109,7 @@ async def main():
         )                
 
         start = 7_000_000
-        end = 7_500_000
+        end = 7_800_000
 
         if start <= last_downloaded:
             start = last_downloaded
@@ -178,7 +124,7 @@ async def main():
 
         # Runs through groups for downloading from the RPC
         async with httpx.AsyncClient() as httpx_client:            
-            with multiprocessing.Pool(CPU_COUNT*2) as pool:
+            with multiprocessing.Pool(CPU_COUNT) as pool:
                 for i in range((end - start) // GROUPING + 1):
                     tasks = {}
                     start_time = time.time()
@@ -187,7 +133,7 @@ async def main():
                         block = start + i * GROUPING + j
                         tasks[block] = asyncio.create_task(download_block(httpx_client, pool, block))                    
 
-                    # This should never happen, just a precaution
+                    # This should never happen, just a precaution. When this does happen nothing works (ex: node down, no binary to decode)
                     try:
                         values = await asyncio.gather(*tasks.values())
                         save_values_to_sql(values)                                                
@@ -208,7 +154,64 @@ async def main():
         exit(1)
 
 
-def save_values_to_sql(values: list[BlockData]):    
+DUMPFILE = os.path.join(os.path.dirname(__file__), "tmp-amino.json")
+OUTFILE = os.path.join(os.path.dirname(__file__), "tmp-output.json")
+
+def do_logic(db: Database, to_decode: list[dict]):
+    start_time = time.time()
+
+    # Dump our amino to file so the juno-decoder can pick it up (decodes in chunks)    
+    with open(DUMPFILE, 'w') as f:
+        json.dump(to_decode, f)  
+
+    values = run_decode_file(DUMPFILE, OUTFILE)
+
+    for data in values:
+        tx_id = data["id"]
+        tx_data = json.loads(data["tx"])
+
+        tx = db.get_tx(tx_id)
+        height = 0
+        if tx is not None:
+            height = tx.height
+
+        sender = get_sender(tx_data["body"]["messages"][0], "juno", "junovaloper")
+        if sender is None:
+            print("No sender found for tx: ", tx_id)
+            continue
+
+        # get message types
+        msg_types = {}
+        for msg in tx_data["body"]["messages"]:                
+            if msg["@type"] not in msg_types:
+                msg_types[msg["@type"]] = 0
+
+            msg_types[msg["@type"]] += 1
+
+        msg_types_list = list(msg_types.keys())
+        msg_types_list.sort()
+        
+        for msg_type, count in msg_types.items():                
+            db.insert_type_count(msg_type, count, height)            
+
+        # save users who sent the tx to the database for the users table
+        db.insert_user(sender, height, tx_id)        
+
+        # print(tx_id, tx_data, msg_types)
+        db.update_tx(tx_id, json.dumps(tx_data), json.dumps(msg_types_list)) 
+        # exit(1)
+    
+    db.commit()
+    end_time = time.time()
+    print(f"Time to decode & store ({len(to_decode)}): {end_time - start_time}")     
+        
+    os.remove(DUMPFILE)
+    os.remove(OUTFILE)
+
+
+def save_values_to_sql(values: list[BlockData]):        
+    values.sort(key=lambda x: x.height)
+
     for bd in values:
         if bd == None:  # if we already downloaded or there was an error
             continue
@@ -223,20 +226,43 @@ def save_values_to_sql(values: list[BlockData]):
             # We will update this in a future run after all blocks are indexed to decode            
             unique_id = db.insert_tx(height, amino_tx)            
             sql_tx_ids.append(unique_id)
-
-
-        # print(f"Saving block {height} with {len(sql_tx_ids)} txs: {sql_tx_ids}")
+        
         db.insert_block(height, block_time, sql_tx_ids)
-
-        # for msg_type, count in msg_types.items():
-        #     db.insert_type_count(msg_type, count, height)
 
         # print(f"save_values_to_sql. Exited early")
         # exit(1)
-
         
     # Saves to it after we go through all group of blocks
     db.commit()
+
+    # NOTE: The following allows for bulk decoding from the above Txs
+    # we already sorted above
+    lowest_height = values[0].height    
+    highest_height = values[-1].height
+
+    txs = db.get_txs_in_range(lowest_height, highest_height)
+    print(f"Total Txs in this range: {len(txs)}")
+
+    # Get what Txs we need to decode for the custom -decode binary
+    to_decode = []
+    for tx in txs:
+        if len(tx.tx_json) != 0:
+            continue
+
+        # ignore storecode                  
+        if len(tx.tx_amino) > 30_000:                
+            continue
+
+        to_decode.append({
+            "id": tx.id,   
+            "tx": tx.tx_amino
+        })
+    
+    if len(to_decode) > 0:
+        do_logic(db, to_decode)
+        to_decode.clear()
+        db.commit()
+
     pass
 
 

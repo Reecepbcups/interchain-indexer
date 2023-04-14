@@ -7,6 +7,7 @@ import httpx
 current_dir = os.path.dirname(os.path.realpath(__file__))
 
 COSMOS_BINARY_FILE = "juno-decode"
+
 def run_decode_single_async(tx: str) -> dict:
     # TODO: replace this with proto in the future?
     # We run in a pool for better performance
@@ -19,6 +20,11 @@ def run_decode_single_async(tx: str) -> dict:
     res = os.popen(f"{COSMOS_BINARY_FILE} tx decode {tx} --output json").read()
     return json.loads(res)
 
+
+def run_decode_file(file_loc: str, output_file_loc: str) -> dict:
+    res = os.popen(f"{COSMOS_BINARY_FILE} tx decode-file {file_loc} {output_file_loc}").read()    
+    with open(output_file_loc, 'r') as f:
+        return json.load(f)  
 
 def get_sender(msg: dict, WALLET_PREFIX: str, VALOPER_PREFIX: str) -> str | None:
     keys = [
@@ -38,14 +44,18 @@ def get_sender(msg: dict, WALLET_PREFIX: str, VALOPER_PREFIX: str) -> str | None
 
     # tries to find the sender in the msg even if the key is not found
     for key, value in msg.items():
-        if (
-            isinstance(value, str)
-            and (value.startswith(WALLET_PREFIX) or value.startswith(VALOPER_PREFIX))
-            and len(value) == 43
-        ):
-            with open(os.path.join(current_dir, "get_sender_foundkey.txt"), "a") as f:
-                f.write(f"Found sender: {value} as {key}" + " - " + str(msg) + "\n\n")
-            return value
+
+        if not isinstance(value, str):
+            continue
+
+        if not (value.startswith(WALLET_PREFIX) or value.startswith(VALOPER_PREFIX)):
+            continue
+        
+        # smart contracts are ignored. junovaloper1 = 50 characters.
+        if len(value) > 50:
+            continue        
+
+        return value
 
     # write error to file if there is no sender found (we need to add this type)
     with open(os.path.join(current_dir, "no_sender_error.txt"), "a") as f:
@@ -75,28 +85,6 @@ def get_latest_chain_height(RPC_ARCHIVE: str) -> int:
     print(f"Current Height: {current_height}")
 
     return int(current_height)
-
-
-def get_block_events(block_data: dict) -> dict:
-    # Likely not used anymore since I am not subscribing
-    return block_data.get("events", {})
-
-
-def get_unique_event_addresses(wallet_prefix: str, block_events: dict) -> list[str]:
-    # Likely not used anymore since I am not subscribing
-    # any address which had some action in the block
-    event_addresses: list[str] = []
-
-    for event_key, value in block_events.items():
-        if not isinstance(value, list):
-            continue
-
-        for v in value:
-            if isinstance(v, str) and v.startswith(wallet_prefix):
-                if v not in event_addresses:
-                    event_addresses.append(v)
-
-    return event_addresses
 
 
 def get_block_height(block_data: dict) -> int:
