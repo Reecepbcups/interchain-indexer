@@ -98,6 +98,8 @@ async def download_block(client: httpx.AsyncClient, height: int) -> BlockData | 
     amino_txs = []
     for x in encoded_block_txs:
         if len(x) < 10_000:
+            # ignores store codes & IBC client update Txs (massive)
+            # in 100k blocks (7m height) storage went from 30mb to 5.5mb.
             amino_txs.append(x)
 
     return BlockData(height, block_time, amino_txs)
