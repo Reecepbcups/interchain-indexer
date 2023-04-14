@@ -26,7 +26,7 @@ class Database:
         # users: address, height, tx_id
         self.cur.execute(
             """CREATE TABLE IF NOT EXISTS users (address TEXT, height INTEGER, tx_id INTEGER)"""
-        )        
+        )
 
         # messages: message_type, height, count
         # This may be extra? We could just iter txs but I guess it depends. Can add in the future
@@ -34,7 +34,7 @@ class Database:
         self.cur.execute(
             """CREATE TABLE IF NOT EXISTS messages (message TEXT, height INTEGER, count INTEGER)"""
         )
-        
+
         self.commit()
 
     def get_all_tables(self):
@@ -44,7 +44,6 @@ class Database:
     def get_table_schema(self, table: str):
         self.cur.execute(f"""PRAGMA table_info({table})""")
         return self.cur.fetchall()
-    
 
     # ===================================
     # User
@@ -53,7 +52,7 @@ class Database:
         self.cur.execute(
             """INSERT INTO users (address, height, tx_id) VALUES (?, ?, ?)""",
             (address, height, tx_id),
-        )        
+        )
 
     # ===================================
     # Messages / Types (May not be needed)
@@ -64,7 +63,7 @@ class Database:
             (message_type, height, count),
         )
 
-    def insert_msg_type_count(self, msg_type: str, count: int, height: int):        
+    def insert_msg_type_count(self, msg_type: str, count: int, height: int):
         self.cur.execute(
             """SELECT count FROM messages WHERE message=? AND height=?""",
             (height, msg_type),
@@ -77,7 +76,7 @@ class Database:
         self.cur.execute(
             """INSERT INTO messages (message, height, count) VALUES (?, ?, ?)""",
             (msg_type, height, count),
-        )        
+        )
 
     def get_msg_type_count_at_exact_height(self, msg_type: str, height: int) -> int:
         self.cur.execute(
@@ -88,7 +87,7 @@ class Database:
         if data is None:
             return 0
         return data[0]
-    
+
     def get_msg_type_count_in_range(self, msg_type: str, start: int, end: int) -> int:
         """
         If msg_type is '*', counts all messages
@@ -112,51 +111,51 @@ class Database:
         data = self.cur.fetchall()
         if data is None:
             return []
-                
+
         return sum([x[0] for x in data])
-    
-    def get_msg_types_transactions_in_range(self, msg_type: str, start: int, end: int) -> list[Tx]:
+
+    def get_msg_types_transactions_in_range(
+        self, msg_type: str, start: int, end: int
+    ) -> list[Tx]:
         """
         Returns a list of tx_ids that have the msg_type in the range requested
         """
         txs: list[Tx] = []
-        
-        self.cur.execute(            
+
+        self.cur.execute(
             """SELECT * FROM txs WHERE msg_types LIKE ? AND height>=? AND height<=?""",
             (f"%{msg_type}%", start, end),
         )
         data = self.cur.fetchall()
         if data is None:
             return []
-        
+
         for tx in data:
-            txs.append(Tx(tx[0], tx[1], tx[2], json.loads(tx[3]), tx[4]))            
+            txs.append(Tx(tx[0], tx[1], tx[2], json.loads(tx[3]), tx[4]))
 
         return list(txs)
 
-    def get_msg_types_ids_in_range(self, msg_type: str, start: int, end: int) -> list[int]:
+    def get_msg_types_ids_in_range(
+        self, msg_type: str, start: int, end: int
+    ) -> list[int]:
         """
         Returns a list of tx_ids that have the msg_type in the range requested
         """
         txs: list[int] = []
-        
-        self.cur.execute(            
+
+        self.cur.execute(
             """SELECT id FROM txs WHERE msg_types LIKE ? AND height>=? AND height<=?""",
             (f"%{msg_type}%", start, end),
         )
         data = self.cur.fetchall()
         if data is None:
             return []
-        
+
         for tx in data:
-            txs.append(tx[0])            
+            txs.append(tx[0])
 
         return list(txs)
-            
 
-        
-
-        
     # ===================================
     # Blocks
     # ===================================
@@ -173,25 +172,25 @@ class Database:
             """SELECT * FROM blocks WHERE height=?""",
             (block_height,),
         )
-        data = self.cur.fetchone()        
+        data = self.cur.fetchone()
         if data is None:
             return None
-        
+
         return Block(data[0], data[1], json.loads(data[2]))
 
     def get_earliest_block(self) -> Block | None:
         self.cur.execute("""SELECT * FROM blocks ORDER BY height ASC LIMIT 1""")
         data = self.cur.fetchone()
         if data is None:
-            return None        
+            return None
         return Block(data[0], data[1], json.loads(data[2]))
-    
+
     def get_latest_saved_block(self) -> Block:
         self.cur.execute("""SELECT * FROM blocks ORDER BY height DESC LIMIT 1""")
         data = self.cur.fetchone()
         if data is None:
             return Block(0, "", [])
-        
+
         return Block(data[0], data[1], json.loads(data[2]))
 
     def get_total_blocks(self) -> int:
@@ -200,7 +199,7 @@ class Database:
         if data is None:
             return 0
         return data[0]
-    
+
     def get_missing_blocks(self, start_height, end_height) -> list[int]:
         # get all blocks which we do not have value for between a range
         self.cur.execute(
@@ -209,18 +208,22 @@ class Database:
         )
         data = self.cur.fetchall()
         if data is None:
-            return list(range(start_height, end_height+1))
-        
+            return list(range(start_height, end_height + 1))
+
         found_heights = set(x[0] for x in data)
-        missing_heights = [height for height in range(start_height, end_height+1) if height not in found_heights]
+        missing_heights = [
+            height
+            for height in range(start_height, end_height + 1)
+            if height not in found_heights
+        ]
         return missing_heights
-    
+
     # ===================================
     # Transactions
     # ===================================
-       
+
     def insert_tx(self, height: int, tx_amino: str):
-        # We insert the data without it being decoded. We can update later 
+        # We insert the data without it being decoded. We can update later
         # insert the height and tx_amino, then return the unique id
         # fill the other collums with empty strings
         self.cur.execute(
@@ -228,13 +231,13 @@ class Database:
             (height, tx_amino, "", ""),
         )
         return self.cur.lastrowid
-    
+
     def update_tx(self, id: int, tx_json: str, msg_types: str):
         # update the data after we decode it (post insert_tx)
         self.cur.execute(
             """UPDATE txs SET tx_json=?, msg_types=? WHERE id=?""",
             (tx_json, msg_types, id),
-        )    
+        )
 
     def get_tx(self, tx_id: int) -> Tx | None:
         self.cur.execute(
@@ -244,39 +247,39 @@ class Database:
         data = self.cur.fetchone()
         if data is None:
             return None
-                
+
         return Tx(data[0], data[1], data[2], data[3], data[4])
-    
 
     def get_txs_in_range(self, start_height: int, end_height: int) -> list[Tx]:
         latest_block = self.get_latest_saved_block()
         if end_height > latest_block.height:
-            end_height = latest_block.height    
-            
+            end_height = latest_block.height
+
         self.cur.execute(
             """SELECT * FROM txs WHERE height BETWEEN ? AND ?""",
             (start_height, end_height),
         )
         data = self.cur.fetchall()
         if data is None:
-            return []                                    
-        
-        return [Tx(x[0], x[1], x[2], x[3], x[4]) for x in data]    
+            return []
 
+        return [Tx(x[0], x[1], x[2], x[3], x[4]) for x in data]
 
-    def get_users_txs_in_range(self, address: str, start_height: int, end_height: int) -> list[Tx]:
+    def get_users_txs_in_range(
+        self, address: str, start_height: int, end_height: int
+    ) -> list[Tx]:
         latest_block = self.get_latest_saved_block()
         if end_height > latest_block.height:
-            end_height = latest_block.height    
-            
+            end_height = latest_block.height
+
         self.cur.execute(
             """SELECT * FROM users WHERE address=? AND height BETWEEN ? AND ?""",
             (address, start_height, end_height),
         )
         data = self.cur.fetchall()
         if data is None:
-            return []        
-    
+            return []
+
         txs = []
         for values in data:
             tx = self.get_tx(values[2])

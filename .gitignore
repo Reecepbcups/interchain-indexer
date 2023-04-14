@@ -10,3 +10,4 @@ data*.db
 errors/
 
 *.json
+.env
