@@ -12,12 +12,13 @@ import asyncio
 import json
 import os
 import random
-import subprocess
 import time
+import traceback
 
 import httpx
-from chain_types import BlockData
 from dotenv import load_dotenv
+
+from chain_types import BlockData
 from SQL import Database
 from util import command_exists, get_latest_chain_height, get_sender, run_decode_file
 
@@ -69,8 +70,8 @@ DECODE_LIMIT = 10_000
 
 async def download_block(client: httpx.AsyncClient, height: int) -> BlockData | None:
     if db.get_block(height) != None:
-        if height % 1000 == 0:
-            print(f"Block {height} is already downloaded & saved in SQL")
+        if height % (GROUPING*5) == 0:
+            print(f"Block {height} is already saved.")
         return None
 
     RPC_ARCHIVE_URL = random.choice(RPC_ARCHIVE_LINKS)
@@ -96,65 +97,74 @@ async def download_block(client: httpx.AsyncClient, height: int) -> BlockData | 
     # Removes CosmWasm store_codes
     amino_txs = []
     for x in encoded_block_txs:
-        if len(x) < 32000:
+        if len(x) < 10_000:
             amino_txs.append(x)
 
-    return BlockData(height, block_time, encoded_block_txs)
+    return BlockData(height, block_time, amino_txs)
 
+async def do_mass_url_download_and_decode(i:int, httpx_client):
+    tasks = {}
+    start_time = time.time()
+    for j in range(GROUPING):
+        # block index from the grouping its in
+        block = START_BLOCK + i * GROUPING + j
+
+        if block != 0:            
+            tasks[block] = asyncio.create_task(
+                download_block(httpx_client, block)
+            )
+
+    # This should never happen, just a precaution.
+    # When this does happen nothing works (ex: node down, no binary to decode)
+    try:
+        values = await asyncio.gather(*tasks.values())
+        if not all(x is None for x in values):                                         
+            save_values_to_sql(values)
+            print(
+                f"Finished #{len(tasks)} blocks in {time.time() - start_time} seconds @ {START_BLOCK + i * GROUPING} -> {START_BLOCK + (i + 1) * GROUPING}"
+            )
+    except Exception as e:
+        print(f"Erorr: main(): {e}")
+        traceback.print_exc()            
 
 async def main():
     global START_BLOCK, END_BLOCK
 
     while True:
-        last_saved: int = db.get_latest_saved_block().height
+        last_saved_block = db.get_latest_saved_block()
+        latest_saved_height = 0
+        if last_saved_block is not None:
+            latest_saved_height = last_saved_block.height
+
         current_chain_height = get_latest_chain_height(RPC_ARCHIVE=RPC_ARCHIVE_LINKS[0])
-        print(f"Chain height: {current_chain_height:,}. Last saved: {last_saved:,}")
+        print(f"Chain height: {current_chain_height:,}. Last saved: {latest_saved_height:,}")
+
 
         if END_BLOCK > current_chain_height:
-            END_BLOCK = current_chain_height
+            END_BLOCK = current_chain_height        
 
         # ensure end is a multiple of grouping
-        END_BLOCK = current_chain_height - (current_chain_height % GROUPING)
+        END_BLOCK = END_BLOCK - (END_BLOCK % GROUPING)        
         print(
             f"Blocks: {START_BLOCK:,}->{END_BLOCK:,}. Download Spread: {(int(END_BLOCK) - START_BLOCK):,} blocks"
-        )
+        )            
 
-        # This is a list of list of tasks to do. Each task should be done on its own thread
-        async with httpx.AsyncClient() as httpx_client:
-            # with multiprocessing.Pool(multiprocessing.cpu_count()) as pool:
-            for i in range((END_BLOCK - START_BLOCK) // GROUPING + 1):
-                tasks = {}
-                start_time = time.time()
-                for j in range(GROUPING):
-                    # block index from the grouping its in
-                    block = START_BLOCK + i * GROUPING + j
-                    tasks[block] = asyncio.create_task(
-                        download_block(httpx_client, block)
-                    )
+        # This is a list of list of tasks to do. Each task should be done on its own thread\
+        async with httpx.AsyncClient() as httpx_client:            
+            for i in range((END_BLOCK - START_BLOCK) // GROUPING + 1): # +1 to grouping or  no?                
+                await do_mass_url_download_and_decode(i, httpx_client)
+                # print(f"early return on purpose for testing"); exit(1)            
 
-                # This should never happen, just a precaution.
-                # When this does happen nothing works (ex: node down, no binary to decode)
-                try:
-                    values = await asyncio.gather(*tasks.values())
-                    if all(x is None for x in values):
-                        continue
-                    save_values_to_sql(values)
-                except Exception as e:
-                    print(f"Erorr: main(): {e}")
-                    continue
-
-                print(
-                    f"Finished #{len(tasks)} blocks in {time.time() - start_time} seconds @ {START_BLOCK + i * GROUPING} -> {START_BLOCK + (i + 1) * GROUPING}"
-                )
-
-                # print(f"early return on purpose for testing"); exit(1)
 
         # TODO: how does this handle if we only have like 5 blocks to download? (After we sync to tip)
+        # Also if we specify more than what grouping allows (ex: groups of 500 but we have 30 erxtra blocks on each side.)
         print("Finished")
         time.sleep(6)
         exit(1)
 
 
+# TODO: Double check these values actually got decoded. I do not think they did.
+# For Tx JSON and Msg Types / users. Double check all methods in testing
 def decode_and_save_updated(to_decode: list[dict]):
     global db
 
@@ -173,10 +183,9 @@ def decode_and_save_updated(to_decode: list[dict]):
         tx_data = json.loads(data["tx"])
 
         tx = db.get_tx(tx_id)
-        height = 0
-        if tx is not None:
-            height = tx.height
-
+        if tx is None:
+            continue
+                
         sender = get_sender(tx_data["body"]["messages"][0], "juno", "junovaloper")
         if sender is None:
             print("No sender found for tx: ", tx_id)
@@ -185,21 +194,18 @@ def decode_and_save_updated(to_decode: list[dict]):
         # get message types
         msg_types = {}
         for msg in tx_data["body"]["messages"]:
-            if msg["@type"] not in msg_types:
-                msg_types[msg["@type"]] = 0
+            _type = msg["@type"]
+            if _type not in msg_types:
+                msg_types[_type] = 0
 
-            msg_types[msg["@type"]] += 1
+            msg_types[_type] += 1
 
         msg_types_list = list(msg_types.keys())
         msg_types_list.sort()
-
         for msg_type, count in msg_types.items():
-            db.insert_msg_type_count(msg_type, count, height)
-
-        # save users who sent the tx to the database for the users table
-        db.insert_user(sender, height, tx_id)
-
-        db.update_tx(tx_id, json.dumps(tx_data), json.dumps(msg_types_list))
+            db.insert_msg_type_count(msg_type, count, tx.height)        
+        
+        db.update_tx(tx_id, json.dumps(tx_data), json.dumps(msg_types_list), sender)
         # exit(1)
 
     db.commit()
@@ -207,8 +213,6 @@ def decode_and_save_updated(to_decode: list[dict]):
     if TASK == "decode":
         print(f"Time to decode & store ({len(to_decode)}): {time.time() - start_time}")
 
-    # os.remove(DUMPFILE)
-    # os.remove(OUTFILE)
     pass
 
 
@@ -290,7 +294,7 @@ def save_values_to_sql(values: list[BlockData]):
         sql_tx_ids: list[int] = []
         for amino_tx in amino_txs:
             # Amino encoded Tx string in the databse
-            # We will update this in a future run after all blocks are indexed to decode
+            # NOTE: insert multiple any faster?  then return rows in the same order          
             unique_id = db.insert_tx(height, amino_tx)
             sql_tx_ids.append(unique_id)
 
@@ -310,9 +314,9 @@ def save_values_to_sql(values: list[BlockData]):
 
 
 if __name__ == "__main__":
-    db = Database(os.path.join(current_dir, "data.db"))
-    db.optimize_tables()
+    db = Database(os.path.join(current_dir, "data.db"))    
     db.create_tables()
+    db.optimize_db(vacuum=False)
 
     if TASK == "decode":
         print(

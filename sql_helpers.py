@@ -22,9 +22,26 @@ def main():
     print(f"Earliest Block: {earliest_block.height}")
     print(f"Latest Block Height: {latest_block.height}")
 
+    block = db.get_block(latest_block.height-1)
+    print(f"\nBlock {block.height} has {len(block.tx_ids)} txs")
+    print(f"Block {block.height} has {block.time} time")
+
+    tx = db.get_tx(block.tx_ids[0])
+    print(tx)
+    # print(tx.tx_json)
+
+
     # get total Txs
-    total_txs = db.get_txs_in_range(earliest_block.height, earliest_block.height+100_000)
-    print(f"Total Txs: {len(total_txs):,}")
+    # total_txs = db.get_txs_in_range(earliest_block.height, earliest_block.height+1_000)
+    # print(f"Total Txs: {len(total_txs):,}")\
+    
+    # txs: list[Tx] = db.get_users_txs_in_range(
+    #     "juno1nsnhn0y0vsjq8j70z6yfxp2xk4rsjrzmn04g4h",
+    #     earliest_block.height,
+    #     latest_block.height,
+    # )
+    # print(f"User txs len: {len(txs)}")
+
     exit(1)
 
     total: int = db.get_msg_type_count_in_range(

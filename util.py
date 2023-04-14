@@ -10,6 +10,7 @@ current_dir = os.path.dirname(os.path.realpath(__file__))
 def run_decode_file(
     COSMOS_BINARY_FILE: str, file_loc: str, output_file_loc: str
 ) -> dict:
+    # TODO: What if I just return to stdout instead of an output file, and speef improvement? Need to benchmark
     res = os.popen(
         f"{COSMOS_BINARY_FILE} tx decode-file {file_loc} {output_file_loc}"
     ).read()
@@ -24,6 +25,7 @@ def command_exists(cmd):
 
 
 def get_sender(msg: dict, WALLET_PREFIX: str, VALOPER_PREFIX: str) -> str | None:
+    # MultibankSend not yet supported
     keys = [
         "sender",
         "delegator_address",

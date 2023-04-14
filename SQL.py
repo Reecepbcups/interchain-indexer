@@ -8,37 +8,40 @@ class Database:
     def __init__(self, db: str):
         self.conn = sqlite3.connect(db)
         self.cur = self.conn.cursor()
+        # self.optimize_db(vacuum=False) # never run vacuum here
+        # self.cur.execute("""PRAGMA temp_store=MEMORY""")
+        # self.optimize_tables()
 
     def commit(self):
         self.conn.commit()
 
-    def create_tables(self):
+    def create_tables(self):        
         # height, time, txs_ids
         self.cur.execute(
             """CREATE TABLE IF NOT EXISTS blocks (height INTEGER PRIMARY KEY, time TEXT, txs TEXT)"""
         )
 
-        # txs: id int primary key auto inc, height, tx_amino, msg_types, tx_json
+        # txs: id int primary key auto inc, height, tx_amino, msg_types, tx_json        
         self.cur.execute(
-            """CREATE TABLE IF NOT EXISTS txs (id INTEGER PRIMARY KEY AUTOINCREMENT, height INTEGER, tx_amino TEXT, msg_types TEXT, tx_json TEXT)"""
+            """CREATE TABLE IF NOT EXISTS txs (id INTEGER PRIMARY KEY AUTOINCREMENT, height INTEGER, tx_amino TEXT, msg_types TEXT, tx_json TEXT, address TEXT)"""
         )
 
         # users: address, height, tx_id
-        self.cur.execute(
-            """CREATE TABLE IF NOT EXISTS users (address TEXT, height INTEGER, tx_id INTEGER)"""
-        )
+        # self.cur.execute(
+        #     """CREATE TABLE IF NOT EXISTS users (address TEXT, height INTEGER, tx_id INTEGER)"""
+        # )
 
         # messages: message_type, height, count
         # This may be extra? We could just iter txs but I guess it depends. Can add in the future
         # NOTE: May remove later
         self.cur.execute(
             """CREATE TABLE IF NOT EXISTS messages (message TEXT, height INTEGER, count INTEGER)"""
-        )
+        )        
 
         self.commit()
 
     def optimize_tables(self):
-        # CREATE INDEX tag_titles ON tags (title);
+        # Only runs this after we have saved values
         # self.cur.execute("""VACUUM""")
 
         # for blocks, create an index at height
@@ -46,16 +49,29 @@ class Database:
 
         # index txs by id & height
         self.cur.execute(
-            """CREATE INDEX IF NOT EXISTS txs_id_height ON txs (id, height)"""
+            """CREATE INDEX IF NOT EXISTS txs_id_height ON txs (id, height, address)"""
         )  
 
         # index messages by height
-        self.cur.execute("""CREATE INDEX IF NOT EXISTS messages_height ON messages (height)""")
+        # self.cur.execute("""CREATE INDEX IF NOT EXISTS messages_height ON messages (height)""")
 
         # index users by height
-        self.cur.execute("""CREATE INDEX IF NOT EXISTS users_height ON users (height)""")
+        # self.cur.execute("""CREATE INDEX IF NOT EXISTS users_height ON users (height)""")
 
         self.commit()
+    
+    def optimize_db(self, vacuum: bool = False):
+        # self.optimize_tables()
+        # Set journal mode to WAL. - https://charlesleifer.com/blog/going-fast-with-sqlite-and-python/
+        self.cur.execute("""PRAGMA journal_mode=WAL""")        
+        # self.cur.execute("""PRAGMA synchronous=OFF""") # off? or normal?        
+        self.cur.execute("""PRAGMA mmap_size=30000000000""")        
+        self.cur.execute(f"""PRAGMA page_size=32768""")
+        if vacuum:
+            self.cur.execute("""VACUUM""")        
+            self.cur.execute("""PRAGMA optimize""")
+        self.commit()
+
 
     def get_indexes(self):
         self.cur.execute("""SELECT name FROM sqlite_master WHERE type='index';""")
@@ -72,11 +88,11 @@ class Database:
     # ===================================
     # User
     # ===================================
-    def insert_user(self, address: str, height: int, tx_id: int):
-        self.cur.execute(
-            """INSERT INTO users (address, height, tx_id) VALUES (?, ?, ?)""",
-            (address, height, tx_id),
-        )
+    # def insert_user(self, address: str, height: int, tx_id: int):
+    #     self.cur.execute(
+    #         """INSERT INTO users (address, height, tx_id) VALUES (?, ?, ?)""",
+    #         (address, height, tx_id),
+    #     )
 
     # ===================================
     # Messages / Types (May not be needed)
@@ -143,9 +159,7 @@ class Database:
     ) -> list[Tx]:
         """
         Returns a list of tx_ids that have the msg_type in the range requested
-        """
-        txs: list[Tx] = []
-
+        """    
         self.cur.execute(
             """SELECT * FROM txs WHERE msg_types LIKE ? AND height>=? AND height<=?""",
             (f"%{msg_type}%", start, end),
@@ -153,11 +167,20 @@ class Database:
         data = self.cur.fetchall()
         if data is None:
             return []
+        
+        blankTx = Tx(0, 0, "", [], "", "")
 
+        txs: list[Tx] = []
         for tx in data:
-            txs.append(Tx(tx[0], tx[1], tx[2], json.loads(tx[3]), tx[4]))
+            blankTx.id = tx[0]
+            blankTx.height = tx[1]
+            blankTx.tx_amino = tx[2]
+            blankTx.msg_types = json.loads(tx[3])
+            blankTx.tx_json = tx[4]
+            blankTx.address = tx[5]
+            txs.append(blankTx)    
 
-        return list(txs)
+        return txs
 
     def get_msg_types_ids_in_range(
         self, msg_type: str, start: int, end: int
@@ -190,7 +213,7 @@ class Database:
             """INSERT INTO blocks (height, time, txs) VALUES (?, ?, ?)""",
             (height, time, json.dumps(txs_ids)),
         )
-
+    
     def get_block(self, block_height: int) -> Block | None:
         self.cur.execute(
             """SELECT * FROM blocks WHERE height=?""",
@@ -198,7 +221,7 @@ class Database:
         )
         data = self.cur.fetchone()
         if data is None:
-            return None
+            return None    
 
         return Block(data[0], data[1], json.loads(data[2]))
 
@@ -207,13 +230,14 @@ class Database:
         data = self.cur.fetchone()
         if data is None:
             return None
+        
         return Block(data[0], data[1], json.loads(data[2]))
 
-    def get_latest_saved_block(self) -> Block:
+    def get_latest_saved_block(self) -> Block | None:
         self.cur.execute("""SELECT * FROM blocks ORDER BY height DESC LIMIT 1""")
         data = self.cur.fetchone()
         if data is None:
-            return Block(0, "", [])
+            return None
 
         return Block(data[0], data[1], json.loads(data[2]))
 
@@ -250,17 +274,18 @@ class Database:
         # We insert the data without it being decoded. We can update later
         # insert the height and tx_amino, then return the unique id
         # fill the other collums with empty strings
+        # """CREATE TABLE IF NOT EXISTS txs (id INTEGER PRIMARY KEY AUTOINCREMENT, height INTEGER, tx_amino TEXT, msg_types TEXT, tx_json TEXT, address TEXT)"""
         self.cur.execute(
-            """INSERT INTO txs (height, tx_amino, msg_types, tx_json) VALUES (?, ?, ?, ?)""",
-            (height, tx_amino, "", ""),
+            """INSERT INTO txs (height, tx_amino, msg_types, tx_json, address) VALUES (?, ?, ?, ?, ?)""",
+            (height, tx_amino, "", "", ""),
         )
         return self.cur.lastrowid
 
-    def update_tx(self, id: int, tx_json: str, msg_types: str):
+    def update_tx(self, _id: int, tx_json: str, msg_types: str, address: str):
         # update the data after we decode it (post insert_tx)
         self.cur.execute(
-            """UPDATE txs SET tx_json=?, msg_types=? WHERE id=?""",
-            (tx_json, msg_types, id),
+            """UPDATE txs SET tx_json=?, msg_types=?, address=? WHERE id=?""",
+            (tx_json, msg_types, address, _id),
         )
 
     def get_tx(self, tx_id: int) -> Tx | None:
@@ -272,23 +297,28 @@ class Database:
         if data is None:
             return None
 
-        return Tx(data[0], data[1], data[2], data[3], data[4])
+        return Tx(data[0], data[1], data[2], data[3], data[4], data[5])
 
     def get_txs_in_range(self, start_height: int, end_height: int) -> list[Tx]:
         latest_block = self.get_latest_saved_block()
+        if latest_block is None:
+            print("No (latest) blocks saved in Database")
+            return []
+
         if end_height > latest_block.height:
             end_height = latest_block.height
 
-        # select * from txs between height ordering by assending
+        # select * from txs between height
+        # M<aybe not returning Amino here?
         self.cur.execute(
-            """SELECT * FROM txs WHERE height>=? AND height<=? ORDER BY height ASC""",
+            """SELECT * FROM txs WHERE height BETWEEN ? AND ?""",
             (start_height, end_height),
         )
         data = self.cur.fetchall()
         if data is None:
             return []
 
-        tx = Tx(0, 0, "", [], "")
+        tx = Tx(0, 0, "", [], "", "")
         txs: list[Tx] = []
         for x in data:
             tx.id = x[0]
@@ -301,24 +331,32 @@ class Database:
         # return [Tx(x[0], x[1], x[2], x[3], x[4]) for x in data]
         return txs
 
-    def get_users_txs_in_range(
-        self, address: str, start_height: int, end_height: int
-    ) -> list[Tx]:
-        latest_block = self.get_latest_saved_block()
-        if end_height > latest_block.height:
-            end_height = latest_block.height
+    # def get_users_txs_in_range(
+    #     self, address: str, start_height: int, end_height: int
+    # ) -> list[Tx]:
+    #     latest_block = self.get_latest_saved_block()
+    #     if latest_block is None:
+    #         print("No (latest) blocks saved in Database")
+    #         return []
+        
+    #     if end_height > latest_block.height:
+    #         end_height = latest_block.height
 
-        self.cur.execute(
-            """SELECT * FROM users WHERE address=? AND height BETWEEN ? AND ?""",
-            (address, start_height, end_height),
-        )
-        data = self.cur.fetchall()
-        if data is None:
-            return []
+    #     print(address, start_height, end_height)
 
-        txs = []
-        for values in data:
-            tx = self.get_tx(values[2])
-            if tx is not None:
-                txs.append(tx)
-        return txs
+    #     # Select all tx_id from users WHERE address=? AND height BETWEEN ? AND ?
+    #     self.cur.execute(
+    #         """SELECT tx_id FROM users WHERE address=? AND height BETWEEN ? AND ?""",
+    #         (address, start_height, end_height),
+    #     )
+    #     data = self.cur.fetchall()        
+
+    #     if data is None:
+    #         return []
+        
+    #     txs = []
+    #     for values in data:
+    #         tx = self.get_tx(values[2])
+    #         if tx is not None:
+    #             txs.append(tx)
+    #     return txs

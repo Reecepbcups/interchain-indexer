@@ -5,6 +5,7 @@ data.db
 *_error.txt
 
 data*.db
+*.db-*
 *.db-journal
 
 errors/

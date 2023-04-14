@@ -22,3 +22,4 @@ class Tx:
     tx_amino: str
     msg_types: list[str] # JSON.load
     tx_json: str
+    address: str
