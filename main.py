@@ -41,13 +41,12 @@ WALLET_LENGTH = 43
 COSMOS_BINARY_FILE = "juno-decode"  # https://github.com/Reecepbcups/juno-decoder
 
 current_dir = os.path.dirname(os.path.realpath(__file__))
-errors_dir = os.path.join(current_dir, "errors")
+
+DUMPFILE = os.path.join(os.path.dirname(__file__), "tmp-amino.json")
+OUTFILE = os.path.join(os.path.dirname(__file__), "tmp-output.json")
 
 
-
-
-async def download_block(client: httpx.AsyncClient, pool, height: int) -> BlockData | None:
-    # Skip already downloaded height data
+async def download_block(client: httpx.AsyncClient, pool, height: int) -> BlockData | None:    
     if db.get_block(height) != None:
         print(f"Block {height} is already downloaded & saved in SQL")
         return None
@@ -55,12 +54,10 @@ async def download_block(client: httpx.AsyncClient, pool, height: int) -> BlockD
     # Query block with client       
     RPC_ARCHIVE_URL = random.choice(RPC_ARCHIVE_LINKS)
     r = await client.get(f"{RPC_ARCHIVE_URL}/block?height={height}", timeout=30)
-    if r.status_code != 200:
-        os.makedirs(errors_dir, exist_ok=True)
-
+    if r.status_code != 200:        
         print(f"Error: {r.status_code} @ height {height}")
-        with open(os.path.join(errors_dir, f"{height}.json"), "w") as f:
-            f.write(r.text)
+        with open(os.path.join(current_dir, f"errors.txt"), "a") as f:
+            f.write(f"Height: {height};{r.status_code} @ {RPC_ARCHIVE_URL} @ {time.time()};{r.text}\n\n")
         return None
 
     block_time = ""
@@ -73,54 +70,30 @@ async def download_block(client: httpx.AsyncClient, pool, height: int) -> BlockD
     except KeyError:
         return None
     
-    # Removes store_codes
+    # Removes CosmWasm store_codes
     encoded_block_txs = [x for x in encoded_block_txs if len(x) < 32000]
-
-    # return stage_block_return_values_format(height, decoded_txs=decoded_txs)
+    
     return BlockData(height, block_time, encoded_block_txs)
 
 
 async def main():
-    if False:
-        # tables = db.get_all_tables()
-        # print(tables)
-        # schema = db.get_table_schema("messages")
-        # print(schema)
-        latest = db.get_latest_saved_block().height
-        print(latest)
-
-        block = db.get_block(latest-1)        
-        print("txs_in_block", block.tx_ids)
-        print("time", block.time)
-
-        tx = db.get_tx(block.tx_ids[-1])
-        print(tx.id, tx.height, tx.msg_types, tx.tx_json)
-
-        pass
-        exit(1)
-
-    # while loop, every 6 seconds query the RPC for latest and download. Try catch
+    # while loop, every 6 seconds query the RPC for latest and download.
     while True:
-        last_downloaded: int = db.get_latest_saved_block().height
-        current_chain_height = get_latest_chain_height(RPC_ARCHIVE=RPC_ARCHIVE_LINKS[0])
-        block_diff = current_chain_height - last_downloaded
-        print(
-            f"Latest live height: {current_chain_height:,}. Last downloaded: {last_downloaded:,}. Behind by: {block_diff:,}"
-        )                
+        last_saved: int = db.get_latest_saved_block().height
+        current_chain_height = get_latest_chain_height(RPC_ARCHIVE=RPC_ARCHIVE_LINKS[0])        
+        print(f"Chain height: {current_chain_height:,}. Last saved: {last_saved:,}")                
 
         start = 7_000_000
         end = 7_800_000
 
-        if start <= last_downloaded:
-            start = last_downloaded
+        if start <= last_saved:
+            start = last_saved
         if end > current_chain_height:
             end = current_chain_height
 
         # ensure end is a multiple of grouping
-        end = current_chain_height - (current_chain_height % GROUPING)
-
-        difference = int(end) - start
-        print(f"Download Spread: {difference:,} blocks")
+        end = current_chain_height - (current_chain_height % GROUPING)    
+        print(f"Download Spread: {(int(end) - start):,} blocks")
 
         # Runs through groups for downloading from the RPC
         async with httpx.AsyncClient() as httpx_client:            
@@ -133,7 +106,8 @@ async def main():
                         block = start + i * GROUPING + j
                         tasks[block] = asyncio.create_task(download_block(httpx_client, pool, block))                    
 
-                    # This should never happen, just a precaution. When this does happen nothing works (ex: node down, no binary to decode)
+                    # This should never happen, just a precaution. 
+                    # When this does happen nothing works (ex: node down, no binary to decode)
                     try:
                         values = await asyncio.gather(*tasks.values())
                         save_values_to_sql(values)                                                
@@ -141,29 +115,27 @@ async def main():
                         print(e)
                         print("Error in tasks")
                         continue                    
-
-                    end_time = time.time()
+                    
                     print(
-                        f"Finished #{len(tasks)} blocks in {end_time - start_time} seconds @ {start + i * GROUPING}"
+                        f"Finished #{len(tasks)} blocks in {time.time() - start_time} seconds @ {start + i * GROUPING}"
                     )
 
                     # print(f"early return on purpose for testing"); exit(1)
 
+        # TODO: how does this handle if we only have like 5 blocks to download? (After we sync to tip)
         print("Finished")
         time.sleep(6)        
         exit(1)
 
-
-DUMPFILE = os.path.join(os.path.dirname(__file__), "tmp-amino.json")
-OUTFILE = os.path.join(os.path.dirname(__file__), "tmp-output.json")
-
-def do_logic(db: Database, to_decode: list[dict]):
+def decode_and_save_updated(db: Database, to_decode: list[dict]):
     start_time = time.time()
 
     # Dump our amino to file so the juno-decoder can pick it up (decodes in chunks)    
     with open(DUMPFILE, 'w') as f:
         json.dump(to_decode, f)  
 
+    # Decodes this file, and saves to the output file (from the chain-decoder binary)
+    # Calls syncronously, since we handle so many decodes in 1 call.
     values = run_decode_file(DUMPFILE, OUTFILE)
 
     for data in values:
@@ -192,7 +164,7 @@ def do_logic(db: Database, to_decode: list[dict]):
         msg_types_list.sort()
         
         for msg_type, count in msg_types.items():                
-            db.insert_type_count(msg_type, count, height)            
+            db.insert_msg_type_count(msg_type, count, height)            
 
         # save users who sent the tx to the database for the users table
         db.insert_user(sender, height, tx_id)        
@@ -207,6 +179,7 @@ def do_logic(db: Database, to_decode: list[dict]):
         
     os.remove(DUMPFILE)
     os.remove(OUTFILE)
+    pass
 
 
 def save_values_to_sql(values: list[BlockData]):        
@@ -239,7 +212,8 @@ def save_values_to_sql(values: list[BlockData]):
     # we already sorted above
     lowest_height = values[0].height    
     highest_height = values[-1].height
-
+    
+    # NOTE: How does this handle if we somehow miss the block that Txs are in? Should be fine i think.
     txs = db.get_txs_in_range(lowest_height, highest_height)
     print(f"Total Txs in this range: {len(txs)}")
 
@@ -259,7 +233,7 @@ def save_values_to_sql(values: list[BlockData]):
         })
     
     if len(to_decode) > 0:
-        do_logic(db, to_decode)
+        decode_and_save_updated(db, to_decode)
         to_decode.clear()
         db.commit()
 
