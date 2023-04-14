@@ -1,4 +1,3 @@
-import json
 from dataclasses import dataclass
 
 
@@ -7,6 +6,11 @@ class BlockData:
     height: int
     block_time: str
     encoded_txs: list[str]
+
+@dataclass
+class DecodeGroup:
+    start: int
+    end: int
 
 
 @dataclass

@@ -22,7 +22,7 @@ def main():
     print(f"Earliest Block: {earliest_block.height}")
     print(f"Latest Block Height: {latest_block.height}")
 
-    block = db.get_block(latest_block.height-1)
+    block = db.get_block(130000)
     print(f"\nBlock {block.height} has {len(block.tx_ids)} txs")
     print(f"Block {block.height} has {block.time} time")
 

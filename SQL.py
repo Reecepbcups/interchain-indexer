@@ -32,11 +32,12 @@ class Database:
         # )
 
         # messages: message_type, height, count
-        # This may be extra? We could just iter txs but I guess it depends. Can add in the future
-        # NOTE: May remove later
-        self.cur.execute(
-            """CREATE TABLE IF NOT EXISTS messages (message TEXT, height INTEGER, count INTEGER)"""
-        )        
+        # This may be extra? We could just iter txs but I guess it depends. Can add in the future        
+        # NOTE: Getting just the count is dumb. If we were to redo this it should be the Tx IDs
+        # self.cur.execute(
+        #     # This was updated in the migrations.txt on current db
+        #     """CREATE TABLE IF NOT EXISTS messages (message TEXT, height INTEGER, count INTEGER)"""
+        # )        
 
         self.commit()
 
@@ -97,6 +98,7 @@ class Database:
     # ===================================
     # Messages / Types (May not be needed)
     # ===================================
+    '''
     def insert_msg_type(self, message_type: str, height: int, count: int):
         self.cur.execute(
             """INSERT INTO messages (message, height, count) VALUES (?, ?, ?)""",
@@ -202,7 +204,8 @@ class Database:
             txs.append(tx[0])
 
         return list(txs)
-
+    '''
+    
     # ===================================
     # Blocks
     # ===================================

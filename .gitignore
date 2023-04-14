@@ -13,7 +13,7 @@ data*.db
 # 
 errors.txt
 errors/
-tmp*.json
+tmp_decode/*.json
 
 # Env Files
 chain_config.json

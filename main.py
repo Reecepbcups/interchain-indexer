@@ -9,16 +9,16 @@ Flow:
 
 import asyncio
 import json
-import logging
 import os
 import random
 import sys
 import time
 import traceback
+import uuid
 
 import httpx
 
-from chain_types import BlockData
+from chain_types import BlockData, DecodeGroup
 from SQL import Database
 from util import command_exists, get_latest_chain_height, get_sender, run_decode_file
 
@@ -35,6 +35,7 @@ chain_section_key = sys.argv[1]
 # https://github.com/Reecepbcups/juno-decode
 COSMOS_PROTO_DECODER_BINARY_FILE = chain_config.get("COSMOS_PROTO_DECODE_BINARY", "juno-decode")
 DECODE_LIMIT = chain_config.get("COSMOS_PROTO_DECODE_LIMIT", 10_000)
+COSMOS_PROTO_DECODE_BLOCK_LIMIT = chain_config.get("COSMOS_PROTO_DECODE_BLOCK_LIMIT", 10_000)
 if not command_exists(COSMOS_PROTO_DECODER_BINARY_FILE):
     print(f"Command {COSMOS_PROTO_DECODER_BINARY_FILE} not found")
     exit(1)
@@ -61,8 +62,8 @@ if len(RPC_ARCHIVE_LINKS) == 0:
     print(f"RPC_ARCHIVE_LINKS is empty")
     exit(1)
 
-DUMPFILE = os.path.join(current_dir, "tmp-amino.json")
-OUTFILE = os.path.join(current_dir, "tmp-output.json")
+tmp_decode_dir = os.path.join(current_dir, "tmp_decode")
+os.makedirs(tmp_decode_dir, exist_ok=True)
 
 built_in_print = print
 def print(*args, **kwargs):
@@ -179,7 +180,11 @@ async def main():
 def decode_and_save_updated(to_decode: list[dict]):
     global db
 
-    start_time = time.time()
+    start_time = time.time()        
+
+    _rand = str(uuid.uuid4())
+    DUMPFILE = os.path.join(tmp_decode_dir, f"in-{_rand}.json")
+    OUTFILE = os.path.join(tmp_decode_dir, f"out-{_rand}.json")
 
     # Dump our amino to file so the juno-decoder can pick it up (decodes in chunks)
     with open(DUMPFILE, "w") as f:
@@ -213,8 +218,9 @@ def decode_and_save_updated(to_decode: list[dict]):
 
         msg_types_list = list(msg_types.keys())
         msg_types_list.sort()
-        for msg_type, count in msg_types.items():
-            db.insert_msg_type_count(msg_type, count, tx.height)        
+        # for msg_type, count in msg_types.items():
+        #     # putting in just count is dumb
+        #     db.insert_msg_type_count(msg_type, count, tx.height)        
         
         db.update_tx(tx_id, json.dumps(tx_data), json.dumps(msg_types_list), sender)
         # exit(1)
@@ -222,73 +228,85 @@ def decode_and_save_updated(to_decode: list[dict]):
     db.commit()
 
     if TASK == "decode":
-        print(f"Time to decode & store ({len(to_decode)}): {time.time() - start_time}")
+        print(f"Time: Decoded & stored ({len(to_decode)} Txs): {time.time() - start_time}")
+
+    os.remove(DUMPFILE)
+    os.remove(OUTFILE)
 
     pass
+
 
 
 def do_decode(lowest_height: int, highest_height: int):
     global db
 
     # make this into groups of 10_000 blocks
-    groups = []
-    BLOCKS_GROUPING = 5_000
+    groups: list[DecodeGroup] = []    
 
-    if highest_height - lowest_height <= BLOCKS_GROUPING:
-        groups.append(
-            {
-                "start": lowest_height,
-                "end": highest_height,
-            }
-        )
+    # nom reason to create a new object every time, so we use this and append to groups
+    blankDecode = DecodeGroup(0, 0)
+    if highest_height - lowest_height <= COSMOS_PROTO_DECODE_BLOCK_LIMIT:
+        # groups.append(
+        #     {
+        #         "start": lowest_height,
+        #         "end": highest_height,
+        #     }
+        # )        
+        groups.append(DecodeGroup(lowest_height, highest_height))
     else:
-        for i in range((highest_height - lowest_height) // BLOCKS_GROUPING + 1):
-            groups.append(
-                {
-                    "start": lowest_height + i * BLOCKS_GROUPING,
-                    "end": lowest_height + (i + 1) * BLOCKS_GROUPING,
-                }
+        for i in range(((highest_height - lowest_height) // COSMOS_PROTO_DECODE_BLOCK_LIMIT + 1)-1):
+            # groups.append(
+            #     {
+            #         "start": lowest_height + i * BLOCKS_GROUPING,
+            #         "end": lowest_height + (i + 1) * BLOCKS_GROUPING,
+            #     }
+            # )
+            groups.append(DecodeGroup(
+                lowest_height + i * COSMOS_PROTO_DECODE_BLOCK_LIMIT, 
+                lowest_height + (i + 1) * COSMOS_PROTO_DECODE_BLOCK_LIMIT
+                )
             )
+    
         # add the final group as the difference
-        if groups[-1]["end"] < highest_height:
-            groups.append(
-                {
-                    "start": groups[-1]["end"],
-                    "end": highest_height,
-                }
-            )
+        if len(groups) > 0 and groups[-1].end < highest_height:
+            # groups.append(
+            #     {
+            #         "start": groups[-1]["end"],
+            #         "end": highest_height,
+            #     }
+            # )
+            groups.append(DecodeGroup(groups[-1].end, highest_height))
+
+    # print(groups)
 
     for group in groups:
-        print(f"Decoding group: {group['start']} -> {group['end']}")
-        start_height = group["start"]
-        end_height = group["end"]
-        # print(f"Decoding {start_height} -> {end_height}")
+        start_height = group.start
+        end_height = group.end                
 
         txs = db.get_txs_in_range(start_height, end_height)
-        print(f"Total Txs in this range: {len(txs)}")
+        print(f"Total Txs in Blocks: {start_height}->{end_height}: {len(txs)}")                        
 
         # Get what Txs we need to decode for the custom -decode binary
         to_decode = []
         for tx in txs:
+            # One run and commit then we see if it persisted correctly with the update and saved data.
             if len(tx.tx_json) != 0:
-                continue
+                continue                            
 
-            # ignore storecode
-            if len(tx.tx_amino) > 30_000:
-                continue
+            # ignore storecode. We do this on download now
+            # if len(tx.tx_amino) > 30_000:
+            #     continue
 
             to_decode.append({"id": tx.id, "tx": tx.tx_amino})
 
             if len(to_decode) >= DECODE_LIMIT:
-                # early decode if too many Txs
+                # early decode if Txs bypass limit
                 decode_and_save_updated(to_decode)
-                to_decode.clear()
-                db.commit()
-
+                to_decode.clear()                
+                
         if len(to_decode) > 0:
             decode_and_save_updated(to_decode)
             to_decode.clear()
-            db.commit()
 
 
 def save_values_to_sql(values: list[BlockData]):
