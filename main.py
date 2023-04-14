@@ -16,9 +16,8 @@ import subprocess
 import time
 
 import httpx
-from dotenv import load_dotenv
-
 from chain_types import BlockData
+from dotenv import load_dotenv
 from SQL import Database
 from util import command_exists, get_latest_chain_height, get_sender, run_decode_file
 
