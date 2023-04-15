@@ -17,6 +17,13 @@ python3 main.py 1
 ...
 ```
 
+## Notes
+
+```text
+- Addresses of UNKOWN are for MultiSendMessages. These Messages do not contain the actual address. There are only a few.
+- Blocks 2578098 and 4136531 are missing due to skipping on upgrades. Should I put empty Block data here?
+```
+
 ## Archive Downloads:
 
 - TODO

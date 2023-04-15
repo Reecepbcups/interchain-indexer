@@ -28,7 +28,10 @@ with open(os.path.join(current_dir, "chain_config.json"), "r") as f:
     chain_config = dict(json.load(f))
 
 # download, decode, and both (when synced fully)
-TASK = chain_config.get("TASK", "sync") 
+TASK = chain_config.get("TASK", "no_impl").lower()
+if TASK not in ['missing', 'download', 'sync', 'decode']:
+    print("TASK is not in the allowed group")
+    exit(1)
 
 
 if len(sys.argv) < 2:
@@ -205,11 +208,13 @@ def decode_and_save_updated(to_decode: list[dict]):
         tx = db.get_tx(tx_id)
         if tx is None:
             continue
+
+        height = tx.height
                 
-        sender = get_sender(tx_data["body"]["messages"][0], "juno", "junovaloper")
+        sender = get_sender(height, tx_data["body"]["messages"][0], "juno", "junovaloper")
         if sender is None:
-            print("No sender found for tx: ", tx_id)
-            continue
+            print("No sender found for tx: ", tx_id, "at height: ", height)
+            sender = "UNKNOWN"
 
         # get message types
         msg_types = {}
@@ -270,7 +275,7 @@ def do_decode(lowest_height: int, highest_height: int):
         if len(groups) > 0 and groups[-1].end < highest_height:
             groups.append(DecodeGroup(groups[-1].end, highest_height))
 
-    # print(groups)
+    print(f"Groups: {len(groups):,}")
 
     latest_block = db.get_latest_saved_block()
     if latest_block is None:
@@ -281,22 +286,18 @@ def do_decode(lowest_height: int, highest_height: int):
         start_height = group.start
         end_height = group.end                
 
-        txs = db.get_txs_in_range(start_height, end_height)
-        print(f"Total Txs in Blocks: {start_height}->{end_height}: {len(txs)}")
+        txs = db.get_non_decoded_txs_in_range(start_height, end_height)
+        print(f"Total non decoded Txs in Blocks: {start_height}->{end_height}: {len(txs)}")
 
         # Get what Txs we need to decode for the custom -decode binary
         to_decode = []
         for tx in txs:
             # One run and commit then we see if it persisted correctly with the update and saved data.
             if len(tx.tx_json) == 0:
-                to_decode.append({"id": tx.id, "tx": tx.tx_amino})                
-
-            # ignore storecode. We do this on download now
-            # if len(tx.tx_amino) > 30_000:
-            #     continue
+                to_decode.append({"id": tx.id, "tx": tx.tx_amino})
 
             if len(to_decode) >= DECODE_LIMIT:
-                # early decode if Txs bypass limit
+                # early decode if Txs hit a large number.
                 decode_and_save_updated(to_decode)
                 to_decode.clear()                
                 
@@ -354,28 +355,55 @@ if __name__ == "__main__":
 
     elif TASK == "missing":
         # runs through all blocks & transactions, see if we missed any.
-        earliest_block = db.get_earliest_block()
-        latest_saved_block = db.get_latest_saved_block()
+        # earliest_block = db.get_earliest_block()
+        # latest_saved_block = db.get_latest_saved_block()
+
+        earliest_block = BlockData(START_BLOCK, "", [])
+        latest_saved_block = BlockData(END_BLOCK, "", []) 
+
         if earliest_block is None or latest_saved_block is None:
             print("No blocks downloaded yet")
             exit(1)
 
+        print(f"Searching through blocks: {earliest_block.height:,} - {latest_saved_block.height:,}")
+
         # TODO: What if we have specific blocks to ignore? Ex: 2578098
         # Maybe we should have an option to fill said blocks ia config with a blank Block with 0 txs like standard?
-        missing_blocks = db.get_missing_blocks(earliest_block.height, latest_saved_block.height)
-        failed_to_decode_txs = db.get_missing_transactions(earliest_block.height, latest_saved_block.height)
 
-        # save both to file if there are any
+        # Missing blocks
+        missing_blocks = db.get_missing_blocks(earliest_block.height, latest_saved_block.height)
         if len(missing_blocks) > 0:
+            missing_blocks.sort()
             with open(os.path.join(current_dir, "missing_blocks.json"), "w") as f:
                 json.dump(missing_blocks, f)
         else:
             print("No missing blocks")
 
+        # To-Decode Txs
+        failed_to_decode_txs = db.get_non_decoded_txs_in_range(earliest_block.height, latest_saved_block.height)
         if len(failed_to_decode_txs) > 0:
             print("Missing txs (ones which are failed to be decoded)...")
+            heights = set()
+            tx_ids = set()
+
+            for tx in failed_to_decode_txs:
+                if tx.height not in heights:
+                    heights.add(tx.height)
+
+                if tx.id not in tx_ids:
+                    tx_ids.add(tx.id)
+
+            _heights = list(heights)
+            _heights.sort()
+            _tx_ids = list(tx_ids)
+            _tx_ids.sort()
+
             with open(os.path.join(current_dir, "missing_txs.json"), "w") as f:
-                json.dump(failed_to_decode_txs, f)
+                json.dump({
+                    "heights": _heights,
+                    "tx_ids": _tx_ids
+                }, f)
+            
         else:
             print("No missing txs (ones which are failed to be decoded)")
         exit(1)

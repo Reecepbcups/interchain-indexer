@@ -24,7 +24,7 @@ def command_exists(cmd):
     return True
 
 
-def get_sender(msg: dict, WALLET_PREFIX: str, VALOPER_PREFIX: str) -> str | None:
+def get_sender(height:int, msg: dict, WALLET_PREFIX: str, VALOPER_PREFIX: str) -> str | None:
     # MultibankSend not yet supported
     keys = [
         "sender",
@@ -57,7 +57,7 @@ def get_sender(msg: dict, WALLET_PREFIX: str, VALOPER_PREFIX: str) -> str | None
 
     # write error to file if there is no sender found (we need to add this type)
     with open(os.path.join(current_dir, "no_sender_error.txt"), "a") as f:
-        f.write(str(msg) + "\n\n")
+        f.write(f"Height:{height} -" + str(msg) + "\n\n")
 
     return None
 

@@ -267,7 +267,7 @@ class Database:
             for height in range(start_height, end_height + 1)
             if height not in found_heights
         ]
-        return missing_heights    
+        return missing_heights
 
     # ===================================
     # Transactions
@@ -317,15 +317,22 @@ class Database:
             txs.append(Tx(x[0], x[1], x[2], x[3], x[4], x[5]))
         
         return txs
-    
-    def get_missing_transactions(self, start_height:int, end_height:int) -> list[Tx]:
-        '''Returns transactions which need to be decoded'''
-        txs = self.get_txs_in_range(start_height, end_height)
-        missing_txs = []
-        for tx in txs:
-            if tx.tx_json == "" or tx.address == "" or tx.msg_types == "":
-                missing_txs.append(tx)
-        return missing_txs
+
+    def get_non_decoded_txs_in_range(self, start_height: int, end_height: int) -> list[Tx]:
+        # returns all txs which have not been decoded in the json field. This field is "" if not decoded
+        self.cur.execute(
+            """SELECT * FROM txs WHERE tx_json="" AND height BETWEEN ? AND ?""",
+            (start_height, end_height),
+        )
+        data = self.cur.fetchall()
+        if data is None:
+            return []
+        
+        txs: list[Tx] = []
+        for x in data:
+            txs.append(Tx(x[0], x[1], x[2], x[3], x[4], x[5]))
+
+        return txs
 
     # def get_users_txs_in_range(
     #     self, address: str, start_height: int, end_height: int

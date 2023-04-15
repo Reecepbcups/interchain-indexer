@@ -21,16 +21,17 @@ def main():
     # print(f"Total Blocks: {total}")
     print(f"Earliest Block: {earliest_block.height}")
     print(f"Latest Block Height: {latest_block.height}")
+    exit(1)
 
-    missing = db.get_missing_blocks(
-        earliest_block.height, latest_block.height
-    )  # add 1 here to ensure it works and we actually miss blocks
-    print(f"Missing Blocks total: {len(missing)}")
-    with open("missing.json", "w") as f:
-        json.dump(missing, f)
+    # missing = db.get_missing_blocks(
+    #     earliest_block.height, latest_block.height
+    # )  # add 1 here to ensure it works and we actually miss blocks
+    # print(f"Missing Blocks total: {len(missing)}")
+    # with open("missing.json", "w") as f:
+    #     json.dump(missing, f)
 
-    block = db.get_block(839000)
-    print(block)
+    # block = db.get_block(839000)
+    # print(block)
 
     # for b in range(2_000_000, 2_100_000):
     #     block = db.get_block(b)
@@ -46,7 +47,20 @@ def main():
     #         exit(1)
 
 
-    tx = db.get_tx(block.tx_ids[-1])
+    # b = db.get_block(7461644)
+    # # print(b)
+
+    # # # loop through b.tx_ids, get_tx, and see if sender is set
+    # for tx_id in b.tx_ids:
+    #     tx = db.get_tx(tx_id)
+    #     if len(tx.tx_json) == 0:
+    #         print(tx_id, tx, '\n\n')
+    
+    # exit(1)
+
+    # tx = db.get_tx(block.tx_ids[-1])
+    # tx = db.get_tx(18_668_234) # bank multi send - no sender. hmm
+    tx = db.get_tx(17470871) # bank multi send - no sender. hmm
     print(tx)
     exit(1)
     # print(tx.tx_json)
