@@ -89,6 +89,7 @@ async def download_block(client: httpx.AsyncClient, height: int) -> BlockData | 
 
     RPC_ARCHIVE_URL = random.choice(RPC_ARCHIVE_LINKS)
     REAL_URL = f"{RPC_ARCHIVE_URL}/block?height={height}"
+    # TODO: on SSL / error, retry 1 time? (without inf loop)
     r = await client.get(REAL_URL, timeout=30)
     if r.status_code != 200:
         print(f"Error: {r.status_code} @ height {height}")
@@ -260,6 +261,11 @@ def do_decode(lowest_height: int, highest_height: int):
 
     # print(groups)
 
+    latest_block = db.get_latest_saved_block()
+    if latest_block is None:
+        print("No latest block found. Can not decode. Exiting.")
+        exit(1)
+
     for group in groups:
         start_height = group.start
         end_height = group.end                
@@ -338,23 +344,25 @@ if __name__ == "__main__":
     elif TASK == "missing":
         # runs through all blocks & transactions, see if we missed any.
         earliest_block = db.get_earliest_block()
-        latest_block_downloaded = db.get_latest_saved_block()
-        if earliest_block is None or latest_block_downloaded is None:
+        latest_saved_block = db.get_latest_saved_block()
+        if earliest_block is None or latest_saved_block is None:
             print("No blocks downloaded yet")
-            exit(1)        
+            exit(1)
 
-        missing_blocks = db.get_missing_blocks(earliest_block.height, latest_block_downloaded.height)
-        failed_to_decode_txs = db.get_missing_transactions(earliest_block.height, latest_block_downloaded.height)
+        # TODO: What if we have specific blocks to ignore? Ex: 2578098
+        # Maybe we should have an option to fill said blocks ia config with a blank Block with 0 txs like standard?
+        missing_blocks = db.get_missing_blocks(earliest_block.height, latest_saved_block.height)
+        failed_to_decode_txs = db.get_missing_transactions(earliest_block.height, latest_saved_block.height)
 
         # save both to file if there are any
         if len(missing_blocks) > 0:
-            # dump with JSON
             with open(os.path.join(current_dir, "missing_blocks.json"), "w") as f:
                 json.dump(missing_blocks, f)
         else:
             print("No missing blocks")
 
         if len(failed_to_decode_txs) > 0:
+            print("Missing txs (ones which are failed to be decoded)...")
             with open(os.path.join(current_dir, "missing_txs.json"), "w") as f:
                 json.dump(failed_to_decode_txs, f)
         else:

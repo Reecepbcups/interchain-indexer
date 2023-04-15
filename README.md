@@ -1,6 +1,6 @@
 # cosmos-indexer
 
-Get Started
+## Getting Started
 
 ```bash
 cp chain_config.json.example chain_config.json
@@ -17,10 +17,11 @@ python3 main.py 1
 ...
 ```
 
-Archive Downloads:
+## Archive Downloads:
+
 - TODO
 
-Compression & Decompression
+## Compression & Decompression
 
 ```bash
 # compressed

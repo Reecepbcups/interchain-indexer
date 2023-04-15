@@ -9,6 +9,7 @@ data.db
 data*.db
 *.db-*
 *.db-journal
+*.tar.gz
 
 # 
 errors.txt

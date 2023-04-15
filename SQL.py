@@ -303,16 +303,7 @@ class Database:
         return Tx(data[0], data[1], data[2], data[3], data[4], data[5])
 
     def get_txs_in_range(self, start_height: int, end_height: int) -> list[Tx]:
-        latest_block = self.get_latest_saved_block()
-        if latest_block is None:
-            print("No (latest) blocks saved in Database")
-            return []
-
-        if end_height > latest_block.height:
-            end_height = latest_block.height
-
-        # select * from txs between height
-        # M<aybe not returning Amino here?
+        # What if end_height > saved, we are good yes?
         self.cur.execute(
             """SELECT * FROM txs WHERE height BETWEEN ? AND ?""",
             (start_height, end_height),
