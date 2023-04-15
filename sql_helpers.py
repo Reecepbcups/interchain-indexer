@@ -22,12 +22,23 @@ def main():
     print(f"Earliest Block: {earliest_block.height}")
     print(f"Latest Block Height: {latest_block.height}")
 
-    block = db.get_block(130000)
-    print(f"\nBlock {block.height} has {len(block.tx_ids)} txs")
-    print(f"Block {block.height} has {block.time} time")
+    # for b in range(2_000_000, 2_100_000):
+    #     block = db.get_block(b)
+    #     if block is None:
+    #         continue        
 
-    tx = db.get_tx(block.tx_ids[0])
+    #     if len(block.tx_ids) > 0:
+    #         print(f"\nBlock {block.height} has {len(block.tx_ids)} txs")
+    #         print(f"Block {block.height} has {block.time} time")
+
+    #         tx = db.get_tx(block.tx_ids[0])
+    #         print(tx)
+    #         exit(1)
+
+
+    tx = db.get_tx(100_001)
     print(tx)
+    exit(1)
     # print(tx.tx_json)
 
 

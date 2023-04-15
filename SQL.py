@@ -321,17 +321,10 @@ class Database:
         if data is None:
             return []
 
-        tx = Tx(0, 0, "", [], "", "")
         txs: list[Tx] = []
         for x in data:
-            tx.id = x[0]
-            tx.height = x[1]
-            tx.tx_amino = x[2]
-            tx.msg_types = x[3]
-            tx.tx_json = x[4]
-            txs.append(tx)
-
-        # return [Tx(x[0], x[1], x[2], x[3], x[4]) for x in data]
+            txs.append(Tx(x[0], x[1], x[2], x[3], x[4], x[5]))
+        
         return txs
 
     # def get_users_txs_in_range(

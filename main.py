@@ -222,8 +222,7 @@ def decode_and_save_updated(to_decode: list[dict]):
         #     # putting in just count is dumb
         #     db.insert_msg_type_count(msg_type, count, tx.height)        
         
-        db.update_tx(tx_id, json.dumps(tx_data), json.dumps(msg_types_list), sender)
-        # exit(1)
+        db.update_tx(tx_id, json.dumps(tx_data), json.dumps(msg_types_list), sender)                    
 
     db.commit()
 
@@ -232,7 +231,6 @@ def decode_and_save_updated(to_decode: list[dict]):
 
     os.remove(DUMPFILE)
     os.remove(OUTFILE)
-
     pass
 
 
@@ -242,25 +240,11 @@ def do_decode(lowest_height: int, highest_height: int):
 
     # make this into groups of 10_000 blocks
     groups: list[DecodeGroup] = []    
-
-    # nom reason to create a new object every time, so we use this and append to groups
-    blankDecode = DecodeGroup(0, 0)
-    if highest_height - lowest_height <= COSMOS_PROTO_DECODE_BLOCK_LIMIT:
-        # groups.append(
-        #     {
-        #         "start": lowest_height,
-        #         "end": highest_height,
-        #     }
-        # )        
+    
+    if highest_height - lowest_height <= COSMOS_PROTO_DECODE_BLOCK_LIMIT:     
         groups.append(DecodeGroup(lowest_height, highest_height))
     else:
         for i in range(((highest_height - lowest_height) // COSMOS_PROTO_DECODE_BLOCK_LIMIT + 1)-1):
-            # groups.append(
-            #     {
-            #         "start": lowest_height + i * BLOCKS_GROUPING,
-            #         "end": lowest_height + (i + 1) * BLOCKS_GROUPING,
-            #     }
-            # )
             groups.append(DecodeGroup(
                 lowest_height + i * COSMOS_PROTO_DECODE_BLOCK_LIMIT, 
                 lowest_height + (i + 1) * COSMOS_PROTO_DECODE_BLOCK_LIMIT
@@ -269,12 +253,6 @@ def do_decode(lowest_height: int, highest_height: int):
     
         # add the final group as the difference
         if len(groups) > 0 and groups[-1].end < highest_height:
-            # groups.append(
-            #     {
-            #         "start": groups[-1]["end"],
-            #         "end": highest_height,
-            #     }
-            # )
             groups.append(DecodeGroup(groups[-1].end, highest_height))
 
     # print(groups)
@@ -284,20 +262,18 @@ def do_decode(lowest_height: int, highest_height: int):
         end_height = group.end                
 
         txs = db.get_txs_in_range(start_height, end_height)
-        print(f"Total Txs in Blocks: {start_height}->{end_height}: {len(txs)}")                        
+        print(f"Total Txs in Blocks: {start_height}->{end_height}: {len(txs)}")
 
         # Get what Txs we need to decode for the custom -decode binary
         to_decode = []
         for tx in txs:
             # One run and commit then we see if it persisted correctly with the update and saved data.
-            if len(tx.tx_json) != 0:
-                continue                            
+            if len(tx.tx_json) == 0:
+                to_decode.append({"id": tx.id, "tx": tx.tx_amino})                
 
             # ignore storecode. We do this on download now
             # if len(tx.tx_amino) > 30_000:
             #     continue
-
-            to_decode.append({"id": tx.id, "tx": tx.tx_amino})
 
             if len(to_decode) >= DECODE_LIMIT:
                 # early decode if Txs bypass limit
