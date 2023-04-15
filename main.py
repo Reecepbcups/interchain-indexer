@@ -224,9 +224,20 @@ def decode_and_save_updated(to_decode: list[dict]):
         msg_types_list.sort()
         # for msg_type, count in msg_types.items():
         #     # putting in just count is dumb
-        #     db.insert_msg_type_count(msg_type, count, tx.height)        
-        
-        db.update_tx(tx_id, json.dumps(tx_data), json.dumps(msg_types_list), sender)                    
+        #     db.insert_msg_type_count(msg_type, count, tx.height)   
+
+        for i in range(60):     
+            try:
+                # 'hacky' way to bypass database is locked issue. Really should use 'BEGIN IMMEDIATE' here
+                db.update_tx(tx_id, json.dumps(tx_data), json.dumps(msg_types_list), sender)
+                break
+            except Exception as e:
+                # Sleeps between 0.5 and 1.5
+                random_sleep = random.random() + 0.5
+                print(f"[!] Error: decode_and_save_updated(): {e}. Waiting {random_sleep} seconds to try again")
+                # traceback.print_exc()
+                time.sleep(random_sleep)
+                continue                   
 
     db.commit()
 
