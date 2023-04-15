@@ -27,9 +27,15 @@ current_dir = os.path.dirname(os.path.realpath(__file__))
 with open(os.path.join(current_dir, "chain_config.json"), "r") as f:
     chain_config = dict(json.load(f))
 
+# download, decode, and both (when synced fully)
+TASK = chain_config.get("TASK", "sync") 
+
+
 if len(sys.argv) < 2:
     print(f"Please specify a key: {chain_config.get('sections', {}).keys()}")
     exit(1)
+
+
 chain_section_key = sys.argv[1]
 
 # https://github.com/Reecepbcups/juno-decode
@@ -39,9 +45,6 @@ COSMOS_PROTO_DECODE_BLOCK_LIMIT = chain_config.get("COSMOS_PROTO_DECODE_BLOCK_LI
 if not command_exists(COSMOS_PROTO_DECODER_BINARY_FILE):
     print(f"Command {COSMOS_PROTO_DECODER_BINARY_FILE} not found")
     exit(1)
-
-# download, decode, and both (when synced fully)
-TASK = chain_config.get("TASK", "sync") 
 
 WALLET_PREFIX = chain_config.get("WALLET_PREFIX", 'juno1')
 VALOPER_PREFIX = chain_config.get("VALOPER_PREFIX", 'junovaloper1')
@@ -171,7 +174,7 @@ async def main():
         # TODO: how does this handle if we only have like 5 blocks to download? (After we sync to tip)
         # Also if we specify more than what grouping allows (ex: groups of 500 but we have 30 erxtra blocks on each side.)
         print("Finished")
-        time.sleep(6)
+        # time.sleep(6)
         exit(1)
 
 
@@ -331,6 +334,34 @@ if __name__ == "__main__":
         )
         do_decode(START_BLOCK, END_BLOCK)
         exit(1)
+
+    elif TASK == "missing":
+        # runs through all blocks & transactions, see if we missed any.
+        earliest_block = db.get_earliest_block()
+        latest_block_downloaded = db.get_latest_saved_block()
+        if earliest_block is None or latest_block_downloaded is None:
+            print("No blocks downloaded yet")
+            exit(1)        
+
+        missing_blocks = db.get_missing_blocks(earliest_block.height, latest_block_downloaded.height)
+        failed_to_decode_txs = db.get_missing_transactions(earliest_block.height, latest_block_downloaded.height)
+
+        # save both to file if there are any
+        if len(missing_blocks) > 0:
+            # dump with JSON
+            with open(os.path.join(current_dir, "missing_blocks.json"), "w") as f:
+                json.dump(missing_blocks, f)
+        else:
+            print("No missing blocks")
+
+        if len(failed_to_decode_txs) > 0:
+            with open(os.path.join(current_dir, "missing_txs.json"), "w") as f:
+                json.dump(failed_to_decode_txs, f)
+        else:
+            print("No missing txs (ones which are failed to be decoded)")
+        exit(1)
+
+
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)

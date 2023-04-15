@@ -22,6 +22,16 @@ def main():
     print(f"Earliest Block: {earliest_block.height}")
     print(f"Latest Block Height: {latest_block.height}")
 
+    missing = db.get_missing_blocks(
+        earliest_block.height, latest_block.height
+    )  # add 1 here to ensure it works and we actually miss blocks
+    print(f"Missing Blocks total: {len(missing)}")
+    with open("missing.json", "w") as f:
+        json.dump(missing, f)
+
+    block = db.get_block(839000)
+    print(block)
+
     # for b in range(2_000_000, 2_100_000):
     #     block = db.get_block(b)
     #     if block is None:
@@ -36,7 +46,7 @@ def main():
     #         exit(1)
 
 
-    tx = db.get_tx(100_001)
+    tx = db.get_tx(block.tx_ids[-1])
     print(tx)
     exit(1)
     # print(tx.tx_json)
@@ -60,10 +70,7 @@ def main():
     )
     print(f"Total Msgs: {total:,}")
 
-    missing = db.get_missing_blocks(
-        earliest_block.height, latest_block.height
-    )  # add 1 here to ensure it works and we actually miss blocks
-    print(f"Missing Blocks total: {len(missing)}")
+
 
     txs_list = db.get_msg_types_transactions_in_range(
         "/cosmwasm.wasm.v1.MsgExecuteContract",
