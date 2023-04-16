@@ -317,11 +317,11 @@ class Database:
             txs.append(Tx(x[0], x[1], x[2], x[3], x[4], x[5]))
         
         return txs
-
+    
     def get_non_decoded_txs_in_range(self, start_height: int, end_height: int) -> list[Tx]:
         # returns all txs which have not been decoded in the json field. This field is "" if not decoded
         self.cur.execute(
-            """SELECT * FROM txs WHERE tx_json="" AND height BETWEEN ? AND ?""",
+            """SELECT * FROM txs WHERE height BETWEEN ? AND ?""",
             (start_height, end_height),
         )
         data = self.cur.fetchall()
@@ -330,7 +330,9 @@ class Database:
         
         txs: list[Tx] = []
         for x in data:
-            txs.append(Tx(x[0], x[1], x[2], x[3], x[4], x[5]))
+            # check if tx_json is "", if so, add it to the array            
+            if x[4] == "":
+                txs.append(Tx(x[0], x[1], x[2], x[3], x[4], x[5]))
 
         return txs
 
