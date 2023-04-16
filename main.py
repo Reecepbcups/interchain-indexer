@@ -145,7 +145,7 @@ async def do_mass_url_download_and_decode(block_range: list[int] | range, httpx_
         if not all(x is None for x in values):                                         
             save_values_to_sql(values)
             print(
-                f"Finished #{len(block_range)} blocks in {time.time() - start_time} seconds ({block_range[0]}->{block_range[-1]})"
+                f"Finished #{len(block_range)} blocks in {round(time.time() - start_time, 4)} seconds ({block_range[0]}->{block_range[-1]})"
             )
     except Exception as e:
         print(f"Erorr: main(): {e}")
@@ -161,7 +161,7 @@ async def main():
             latest_saved_height = last_saved_block.height
 
         current_chain_height = get_latest_chain_height(RPC_ARCHIVE=RPC_ARCHIVE_LINKS[0])
-        print(f"Chain height: {current_chain_height:,}. Last saved: {latest_saved_height:,}")
+        print(f"Last saved: {latest_saved_height:,} & Chain height: {current_chain_height:,}")
 
         if END_BLOCK > current_chain_height:
             END_BLOCK = current_chain_height
@@ -172,9 +172,7 @@ async def main():
 
         # ensure end is a multiple of grouping
         GROUP_END_BLOCK = END_BLOCK - (END_BLOCK % GROUPING)        
-        print(
-            f"Bulk Blocks: {START_BLOCK:,}->{END_BLOCK:,}"
-        ) 
+        print(f"Bulk Blocks: {START_BLOCK:,}->{END_BLOCK:,}")
 
         # This is a list of list of tasks to do. Each task should be done on its own thread\
         async with httpx.AsyncClient() as httpx_client:     
@@ -303,7 +301,7 @@ def do_decode(lowest_height: int, highest_height: int):
         end_height = group.end                
 
         txs = db.get_non_decoded_txs_in_range(start_height, end_height)
-        print(f"Total non decoded Txs in Blocks: {start_height}->{end_height}: {len(txs)}")
+        print(f"Total non decoded Txs in Blocks: {start_height}->{end_height}: Txs #:{len(txs)}")
 
         # Get what Txs we need to decode for the custom -decode binary
         to_decode = []

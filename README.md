@@ -10,7 +10,7 @@ cp chain_config.json.example chain_config.json
 # - download
 # - decode
 # - missing
-# - sync (When you have it all indexed, use this to stay up on the tip.)
+# - sync (When you have it all indexed, use this to stay up on the tip. This gets latest chain & downloaded, and downloads / decodes all inbetween)
 
 python3 main.py 0
 python3 main.py 1
