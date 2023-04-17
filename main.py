@@ -29,29 +29,35 @@ with open(os.path.join(current_dir, "chain_config.json"), "r") as f:
 
 # download, decode, and both (when synced fully)
 TASK = chain_config.get("TASK", "no_impl").lower()
-all_tasks = ['missing', 'download', 'sync', 'decode']
+all_tasks = ["missing", "download", "sync", "decode"]
 if TASK not in all_tasks:
     print(f"TASK is not in the allowed group {', '.join(all_tasks)}")
     exit(1)
 
 if len(sys.argv) < 2:
-    print(f"Please specify a section: ({', '.join(chain_config.get('sections', {}).keys())}) for mode {TASK}")
+    print(
+        f"Please specify a section: ({', '.join(chain_config.get('sections', {}).keys())}) for mode {TASK}"
+    )
     exit(1)
 
 chain_section_key = sys.argv[1]
 
 # https://github.com/Reecepbcups/juno-decode
-COSMOS_PROTO_DECODER_BINARY_FILE = chain_config.get("COSMOS_PROTO_DECODE_BINARY", "juno-decode")
+COSMOS_PROTO_DECODER_BINARY_FILE = chain_config.get(
+    "COSMOS_PROTO_DECODE_BINARY", "juno-decode"
+)
 DECODE_LIMIT = chain_config.get("COSMOS_PROTO_DECODE_LIMIT", 10_000)
-COSMOS_PROTO_DECODE_BLOCK_LIMIT = chain_config.get("COSMOS_PROTO_DECODE_BLOCK_LIMIT", 10_000)
+COSMOS_PROTO_DECODE_BLOCK_LIMIT = chain_config.get(
+    "COSMOS_PROTO_DECODE_BLOCK_LIMIT", 10_000
+)
 if not command_exists(COSMOS_PROTO_DECODER_BINARY_FILE):
     print(f"Command {COSMOS_PROTO_DECODER_BINARY_FILE} not found")
     exit(1)
 
-WALLET_PREFIX = chain_config.get("WALLET_PREFIX", 'juno1')
-VALOPER_PREFIX = chain_config.get("VALOPER_PREFIX", 'junovaloper1')
+WALLET_PREFIX = chain_config.get("WALLET_PREFIX", "juno1")
+VALOPER_PREFIX = chain_config.get("VALOPER_PREFIX", "junovaloper1")
 
-specific_section: dict = chain_config.get('sections', {}).get(chain_section_key, {})
+specific_section: dict = chain_config.get("sections", {}).get(chain_section_key, {})
 if specific_section == {}:
     print(f"Chain section {chain_section_key} not found")
     exit(1)
@@ -71,10 +77,14 @@ tmp_decode_dir = os.path.join(current_dir, "tmp_decode")
 os.makedirs(tmp_decode_dir, exist_ok=True)
 
 built_in_print = print
+
+
 def print(*args, **kwargs):
     # logging.basicConfig(filename=os.path.join(current_dir, 'logs.log'), level=logging.DEBUG, format=f'%(asctime)s %(levelname)s thread:{chain_section_key} %(message)s')
-    # log = logging.getLogger(__name__)    
-    built_in_print(f'(thread:#{chain_section_key})', *args, **kwargs)
+    # log = logging.getLogger(__name__)
+    built_in_print(f"(thread:#{chain_section_key})", *args, **kwargs)
+
+
 print(f"Starting {TASK} task")
 
 
@@ -83,72 +93,117 @@ print(f"Starting {TASK} task")
 # Initialized below
 db: Database
 
-async def download_block(client: httpx.AsyncClient, height: int) -> BlockData | None:
-    if db.get_block(height) != None:
-        if height % (GROUPING*5) == 0:
-            print(f"Block {height} is already saved.")
-        return None
+headers = {
+    "Content-Type": "application/json",
+}
+
+
+async def batch_download_blocks(
+    client: httpx.AsyncClient, heights: list[int]
+) -> list[BlockData]:
+    """
+    None means nothing worked, try again.
+    """
+
+    # Remove duplicates
+    to_download: list[int] = []
+    for height in heights:
+        if height <= 0:
+            continue
+        if height not in to_download:
+            # if db.get_block(height) == None: # we do this alter in the logic now
+            to_download.append(height)
+    to_download.sort()
+
+    if len(to_download) == 0:
+        return []
+
+    current_epoch_time = int(time.time())
+
+    query_payloads = []
+    for height in to_download:
+        query_payloads.append(
+            {
+                "method": "block",
+                "params": [
+                    str(height),
+                ],
+                "id": f"{height}_{current_epoch_time}",
+            }
+        )
 
     RPC_ARCHIVE_URL = random.choice(RPC_ARCHIVE_LINKS)
-    REAL_URL = f"{RPC_ARCHIVE_URL}/block?height={height}"
-    # TODO: on SSL / error, retry 1 time? (without inf loop)
-    r = await client.get(REAL_URL, timeout=30)
+    r = await client.post(
+        RPC_ARCHIVE_URL, headers=headers, json=query_payloads, timeout=30
+    )
     if r.status_code != 200:
         print(f"Error: {r.status_code} @ height {height}")
         with open(os.path.join(current_dir, f"errors.txt"), "a") as f:
             f.write(
-                f"Height: {height};{r.status_code} @ {RPC_ARCHIVE_URL} @ {time.time()};{r.text}\n\n"
+                f"Heights range: {min(heights)}->{max(heights)};{r.status_code} @ {RPC_ARCHIVE_URL} @ {time.time()};{r.text}\n\n"
             )
-        return None
+        return []
 
-    block_time = ""
-    encoded_block_txs: list = []
-    try:
-        v = r.json()["result"]["block"]
-        block_time = v["header"]["time"]  # 2023-04-13T17:46:31.898429796Z
-        encoded_block_txs = v["data"]["txs"]  # ["amino1"]
-    except KeyError:
-        return None
+    blocks_data: list[BlockData] = []
+    for data in r.json():
+        if "id" not in data:
+            if "jsonrpc" in data:
+                continue
+            print(f"Error: 'id' not in the returned value", data)
+            await asyncio.sleep(random.randint(1, 3))
+            await batch_download_blocks(client, heights)
+            # continue
 
-    # Removes CosmWasm store_codes
-    amino_txs = []
-    for x in encoded_block_txs:
-        if len(x) < 10_000:
-            # ignores store codes & IBC client update Txs (massive)
-            # in 100k blocks (7m height) storage went from 30mb to 5.5mb.
-            amino_txs.append(x)
+        block_time = ""
+        encoded_block_txs: list = []
+        height = -1
+        try:
+            if isinstance(data, str):
+                # v = json.loads(data)  # i think this is just supposed to error
+                # wait, then recall batch_download_blocks
+                # randcom number betwen 1 and 5
+                await asyncio.sleep(random.randint(1, 3))
+                await batch_download_blocks(client, heights)
 
-    return BlockData(height, block_time, amino_txs)
+            v = data["result"]["block"]
+            block_time = v["header"]["time"]  # 2023-04-13T17:46:31.898429796Z
+            encoded_block_txs = v["data"]["txs"]  # ["amino1"]
+            height = int(v["header"]["height"])
+        except KeyError:
+            continue
+
+        # Removes StoreCode & IBC client update Txs (massive)
+        amino_txs = []
+        for x in encoded_block_txs:
+            if len(x) < 10_000:
+                amino_txs.append(x)
+
+        blocks_data.append(BlockData(height, block_time, amino_txs))
+
+    return blocks_data
+
 
 # TODO: change to block range already calulated?
 # async def do_mass_url_download_and_decode(i: int, httpx_client):
-async def do_mass_url_download_and_decode(block_range: list[int] | range, httpx_client):    
+async def do_mass_url_download_and_decode(block_range: list[int] | range, httpx_client):
     if isinstance(block_range, range):
         block_range = list(block_range)
 
-    tasks = {}
     start_time = time.time()
-    for block in block_range:    
-        if block > END_BLOCK:
-            break
-
-        if block != 0:            
-            tasks[block] = asyncio.create_task(
-                download_block(httpx_client, block)
-            )
-
-    # This should never happen, just a precaution.
-    # When this does happen nothing works (ex: node down, no binary to decode)
     try:
-        values = await asyncio.gather(*tasks.values())
-        if not all(x is None for x in values):                                         
-            save_values_to_sql(values)
-            print(
-                f"Finished #{len(block_range)} blocks in {round(time.time() - start_time, 4)} seconds ({block_range[0]}->{block_range[-1]})"
-            )
+        blocks_data = await batch_download_blocks(httpx_client, block_range)
+        if blocks_data is None:
+            return
+
+        print(f"blocks_data length: {len(blocks_data)}")
+        save_values_to_sql(blocks_data)
+        print(
+            f"Finished #{len(block_range)} blocks in {round(time.time() - start_time, 4)} seconds ({min(block_range)}->{max(block_range)})"
+        )
     except Exception as e:
         print(f"Erorr: main(): {e}")
-        traceback.print_exc()            
+        traceback.print_exc()
+
 
 async def main():
     global START_BLOCK, END_BLOCK
@@ -160,48 +215,74 @@ async def main():
             latest_saved_height = last_saved_block.height
 
         current_chain_height = get_latest_chain_height(RPC_ARCHIVE=RPC_ARCHIVE_LINKS[0])
-        print(f"Last saved: {latest_saved_height:,} & Chain height: {current_chain_height:,}")
+        print(
+            f"Last saved: {latest_saved_height:,} & Chain height: {current_chain_height:,}"
+        )
 
         if END_BLOCK > current_chain_height:
             END_BLOCK = current_chain_height
-        
+
         if TASK == "sync":
             START_BLOCK = latest_saved_height
             END_BLOCK = current_chain_height
 
         # ensure end is a multiple of grouping
-        GROUP_END_BLOCK = END_BLOCK - (END_BLOCK % GROUPING)        
+        GROUP_END_BLOCK = END_BLOCK - (END_BLOCK % GROUPING)
         print(f"Bulk Blocks: {START_BLOCK:,}->{END_BLOCK:,}")
 
-        # This is a list of list of tasks to do. Each task should be done on its own thread\
-        async with httpx.AsyncClient() as httpx_client:     
+        # This is a list of list of tasks to do. Each task should be done on its own thread
 
-            # if the range is less than GROUPING, we run through that range only            
+        tasks = []
+        async with httpx.AsyncClient() as httpx_client:
+            # if the range is less than GROUPING, we run through that range only
             if END_BLOCK - START_BLOCK <= GROUPING:
-                await do_mass_url_download_and_decode(range(START_BLOCK, current_chain_height+1), httpx_client)
+                tasks.append(
+                    asyncio.create_task(
+                        do_mass_url_download_and_decode(
+                            range(START_BLOCK, current_chain_height + 1), httpx_client
+                        )
+                    )
+                )
             else:
-                num_groups = (GROUP_END_BLOCK - START_BLOCK) // GROUPING + 1            
+                num_groups = (GROUP_END_BLOCK - START_BLOCK) // GROUPING + 1
                 for i in range(num_groups):
-                    block_heights = [bh for bh in range(START_BLOCK + i * GROUPING, START_BLOCK + (i + 1) * GROUPING)]                                                
-                    await do_mass_url_download_and_decode(block_heights, httpx_client)
+                    block_heights = [
+                        bh
+                        for bh in range(
+                            START_BLOCK + i * GROUPING, START_BLOCK + (i + 1) * GROUPING
+                        )
+                    ]
+                    tasks.append(
+                        asyncio.create_task(
+                            do_mass_url_download_and_decode(block_heights, httpx_client)
+                        )
+                    )
 
                 # Do we miss the start block with this?
-                remainder_blocks = range(GROUP_END_BLOCK, END_BLOCK+1)
+                remainder_blocks = range(GROUP_END_BLOCK, END_BLOCK + 1)
                 if remainder_blocks != []:
-                    await do_mass_url_download_and_decode(remainder_blocks, httpx_client)
+                    tasks.append(
+                        asyncio.create_task(
+                            do_mass_url_download_and_decode(
+                                remainder_blocks, httpx_client
+                            )
+                        )
+                    )
 
-                # print(f"early return on purpose for testing"); exit(1)            
+            # split tasks into groups of 10 calls per
+            await asyncio.gather(*tasks)
+            # for i in range(0, len(tasks), 10):
+            #     await asyncio.gather(*tasks[i : i + 10])
 
-
-        print("Sleeping for more blocks.")
-        time.sleep(10)
-        # exit(1)
+        print("Sleeping for more blocks. (exit)")
+        # time.sleep(10)
+        exit(1)
 
 
 def decode_and_save_updated(to_decode: list[dict]):
     global db
 
-    start_time = time.time()        
+    start_time = time.time()
 
     _rand = str(uuid.uuid4())
     DUMPFILE = os.path.join(tmp_decode_dir, f"in-{_rand}.json")
@@ -224,8 +305,10 @@ def decode_and_save_updated(to_decode: list[dict]):
             continue
 
         height = tx.height
-                
-        sender = get_sender(height, tx_data["body"]["messages"][0], "juno", "junovaloper")
+
+        sender = get_sender(
+            height, tx_data["body"]["messages"][0], "juno", "junovaloper"
+        )
         if sender is None:
             print("No sender found for tx: ", tx_id, "at height: ", height)
             sender = "UNKNOWN"
@@ -243,46 +326,53 @@ def decode_and_save_updated(to_decode: list[dict]):
         msg_types_list.sort()
         # for msg_type, count in msg_types.items():
         #     # putting in just count is dumb
-        #     db.insert_msg_type_count(msg_type, count, tx.height)   
+        #     db.insert_msg_type_count(msg_type, count, tx.height)
 
-        for i in range(60):     
+        for i in range(60):
             try:
                 # 'hacky' way to bypass database is locked issue. Really should use 'BEGIN IMMEDIATE' here
-                db.update_tx(tx_id, json.dumps(tx_data), json.dumps(msg_types_list), sender)
+                db.update_tx(
+                    tx_id, json.dumps(tx_data), json.dumps(msg_types_list), sender
+                )
                 break
             except Exception as e:
                 # Sleeps between 0.5 and 1.5
                 random_sleep = random.random() + 0.5
-                print(f"[!] Error: decode_and_save_updated(): {e}. Waiting {random_sleep} seconds to try again")
+                print(
+                    f"[!] Error: decode_and_save_updated(): {e}. Waiting {random_sleep} seconds to try again"
+                )
                 # traceback.print_exc()
                 time.sleep(random_sleep)
-                continue                   
+                continue
 
     db.commit()
 
     if TASK == "decode":
-        print(f"Time: Decoded & stored ({len(to_decode)} Txs): {time.time() - start_time}")
+        print(
+            f"Time: Decoded & stored ({len(to_decode)} Txs): {time.time() - start_time}"
+        )
 
     os.remove(DUMPFILE)
     os.remove(OUTFILE)
     pass
 
 
-
 def do_decode(lowest_height: int, highest_height: int):
     global db
 
     # make this into groups of 10_000 blocks
-    groups: list[DecodeGroup] = []    
-    
-    if highest_height - lowest_height <= COSMOS_PROTO_DECODE_BLOCK_LIMIT:     
+    groups: list[DecodeGroup] = []
+
+    if highest_height - lowest_height <= COSMOS_PROTO_DECODE_BLOCK_LIMIT:
         groups.append(DecodeGroup(lowest_height, highest_height))
     else:
         while lowest_height <= highest_height:
-            group_end = min(lowest_height + COSMOS_PROTO_DECODE_BLOCK_LIMIT - 1, highest_height)
+            group_end = min(
+                lowest_height + COSMOS_PROTO_DECODE_BLOCK_LIMIT - 1, highest_height
+            )
             groups.append(DecodeGroup(lowest_height, group_end))
             lowest_height += COSMOS_PROTO_DECODE_BLOCK_LIMIT
-    
+
         # add the final group as the difference
         if len(groups) > 0 and groups[-1].end < highest_height:
             groups.append(DecodeGroup(groups[-1].end, highest_height))
@@ -295,12 +385,16 @@ def do_decode(lowest_height: int, highest_height: int):
         exit(1)
 
     for group in groups:
-        print(f"Decoding Group: {group.start}->{group.end} ({group.end - group.start} blocks)")
+        print(
+            f"Decoding Group: {group.start}->{group.end} ({group.end - group.start} blocks)"
+        )
         start_height = group.start
-        end_height = group.end                
+        end_height = group.end
 
         txs = db.get_non_decoded_txs_in_range(start_height, end_height)
-        print(f"Total non decoded Txs in Blocks: {start_height}->{end_height}: Txs #:{len(txs)}")
+        print(
+            f"Total non decoded Txs in Blocks: {start_height}->{end_height}: Txs #:{len(txs)}"
+        )
 
         # Get what Txs we need to decode for the custom -decode binary
         to_decode = []
@@ -312,15 +406,15 @@ def do_decode(lowest_height: int, highest_height: int):
             if len(to_decode) >= DECODE_LIMIT:
                 # early decode if Txs hit a large number.
                 decode_and_save_updated(to_decode)
-                to_decode.clear()                
-                
+                to_decode.clear()
+
         if len(to_decode) > 0:
             decode_and_save_updated(to_decode)
             to_decode.clear()
 
 
 def save_values_to_sql(values: list[BlockData]):
-    global db    
+    global db
 
     for bd in values:
         if bd == None:  # if we already downloaded or there was an error
@@ -330,10 +424,15 @@ def save_values_to_sql(values: list[BlockData]):
         block_time = bd.block_time
         amino_txs: list[str] = bd.encoded_txs
 
+        if db.get_block(height) is not None:
+            if height % 500 == 0:
+                print(f"Block #{height} already in the database")
+            continue
+
         sql_tx_ids: list[int] = []
         for amino_tx in amino_txs:
             # Amino encoded Tx string in the databse
-            # NOTE: insert multiple any faster?  then return rows in the same order          
+            # NOTE: insert multiple any faster?  then return rows in the same order
             unique_id = db.insert_tx(height, amino_tx)
             sql_tx_ids.append(unique_id)
 
@@ -346,7 +445,7 @@ def save_values_to_sql(values: list[BlockData]):
     db.commit()
 
     # move task = "decode" here?
-    if TASK == "sync":        
+    if TASK == "sync":
         heights = [v.height for v in values if v is not None]
         if not heights:
             print("Error: no heights found in range")
@@ -361,7 +460,7 @@ def save_values_to_sql(values: list[BlockData]):
 
 
 if __name__ == "__main__":
-    db = Database(os.path.join(current_dir, "data.db"))    
+    db = Database(os.path.join(current_dir, "data.db"))
     db.create_tables()
     db.optimize_tables()
     db.optimize_db(vacuum=False)
@@ -379,19 +478,23 @@ if __name__ == "__main__":
     elif TASK == "missing":
         # runs through all blocks & transactions, see if we missed any.
         earliest_block = BlockData(START_BLOCK, "", [])
-        latest_saved_block = BlockData(END_BLOCK, "", []) 
+        latest_saved_block = BlockData(END_BLOCK, "", [])
         if earliest_block is None or latest_saved_block is None:
             print("No blocks downloaded yet")
             exit(1)
 
-        print(f"Searching through blocks: {earliest_block.height:,} - {latest_saved_block.height:,}")
+        print(
+            f"Searching through blocks: {earliest_block.height:,} - {latest_saved_block.height:,}"
+        )
 
         # TODO: What if we have specific blocks to ignore? Ex: 2578098
         # Maybe we should have an option to fill said blocks ia config with a blank Block with 0 txs like standard?
 
         # Missing blocks
         print("Waitng on missing blocks query...")
-        missing_blocks = db.get_missing_blocks(earliest_block.height, latest_saved_block.height)
+        missing_blocks = db.get_missing_blocks(
+            earliest_block.height, latest_saved_block.height
+        )
         if missing_blocks:
             missing_blocks.sort()
             with open(os.path.join(current_dir, "missing_blocks.json"), "w") as f:
@@ -399,10 +502,11 @@ if __name__ == "__main__":
         else:
             print("No missing blocks in this range")
 
-
         # To-Decode Txs
         print("Waitng on non decoded txs in range query...")
-        failed_to_decode_txs = db.get_non_decoded_txs_in_range(earliest_block.height, latest_saved_block.height)
+        failed_to_decode_txs = db.get_non_decoded_txs_in_range(
+            earliest_block.height, latest_saved_block.height
+        )
         if len(failed_to_decode_txs) > 0:
             print("Missing txs (ones which are failed to be decoded)...")
 
@@ -410,18 +514,13 @@ if __name__ == "__main__":
             tx_ids = sorted(set(tx.id for tx in failed_to_decode_txs))
 
             with open(os.path.join(current_dir, "missing_txs.json"), "w") as f:
-                json.dump({
-                    "heights": heights,
-                    "tx_ids": tx_ids
-                }, f)                
+                json.dump({"heights": heights, "tx_ids": tx_ids}, f)
         else:
             print("No missing decoded txs")
 
         # Requests to download and decode here?
 
         exit(1)
-
-
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
