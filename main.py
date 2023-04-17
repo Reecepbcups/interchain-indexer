@@ -29,15 +29,14 @@ with open(os.path.join(current_dir, "chain_config.json"), "r") as f:
 
 # download, decode, and both (when synced fully)
 TASK = chain_config.get("TASK", "no_impl").lower()
-if TASK not in ['missing', 'download', 'sync', 'decode']:
-    print("TASK is not in the allowed group")
+all_tasks = ['missing', 'download', 'sync', 'decode']
+if TASK not in all_tasks:
+    print(f"TASK is not in the allowed group {', '.join(all_tasks)}")
     exit(1)
-
 
 if len(sys.argv) < 2:
-    print(f"Please specify a key: {chain_config.get('sections', {}).keys()}")
+    print(f"Please specify a section: ({', '.join(chain_config.get('sections', {}).keys())}) for mode {TASK}")
     exit(1)
-
 
 chain_section_key = sys.argv[1]
 
