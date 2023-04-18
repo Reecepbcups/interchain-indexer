@@ -21,14 +21,14 @@ def main():
     # print(f"Total Blocks: {total}")
     print(f"Earliest Block: {earliest_block.height}")
     print(f"Latest Block Height: {latest_block.height}")
-    exit(1)
 
-    # missing = db.get_missing_blocks(
-    #     earliest_block.height, latest_block.height
-    # )  # add 1 here to ensure it works and we actually miss blocks
-    # print(f"Missing Blocks total: {len(missing)}")
+    missing = db.get_missing_blocks(
+        earliest_block.height, latest_block.height
+    )  # add 1 here to ensure it works and we actually miss blocks
+    print(f"Missing Blocks total: {missing}")
     # with open("missing.json", "w") as f:
     #     json.dump(missing, f)
+    exit(1)
 
     # block = db.get_block(839000)
     # print(block)
@@ -36,7 +36,7 @@ def main():
     # for b in range(2_000_000, 2_100_000):
     #     block = db.get_block(b)
     #     if block is None:
-    #         continue        
+    #         continue
 
     #     if len(block.tx_ids) > 0:
     #         print(f"\nBlock {block.height} has {len(block.tx_ids)} txs")
@@ -46,7 +46,6 @@ def main():
     #         print(tx)
     #         exit(1)
 
-
     # b = db.get_block(7461644)
     # # print(b)
 
@@ -55,21 +54,20 @@ def main():
     #     tx = db.get_tx(tx_id)
     #     if len(tx.tx_json) == 0:
     #         print(tx_id, tx, '\n\n')
-    
+
     # exit(1)
 
     # tx = db.get_tx(block.tx_ids[-1])
     # tx = db.get_tx(18_668_234) # bank multi send - no sender. hmm
-    tx = db.get_tx(17470871) # bank multi send - no sender. hmm
+    tx = db.get_tx(17470871)  # bank multi send - no sender. hmm
     print(tx)
     exit(1)
     # print(tx.tx_json)
 
-
     # get total Txs
     # total_txs = db.get_txs_in_range(earliest_block.height, earliest_block.height+1_000)
     # print(f"Total Txs: {len(total_txs):,}")\
-    
+
     # txs: list[Tx] = db.get_users_txs_in_range(
     #     "juno1nsnhn0y0vsjq8j70z6yfxp2xk4rsjrzmn04g4h",
     #     earliest_block.height,
@@ -83,8 +81,6 @@ def main():
         "*", earliest_block.height, earliest_block.height + 1
     )
     print(f"Total Msgs: {total:,}")
-
-
 
     txs_list = db.get_msg_types_transactions_in_range(
         "/cosmwasm.wasm.v1.MsgExecuteContract",
