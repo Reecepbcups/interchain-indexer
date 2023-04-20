@@ -15,13 +15,13 @@ class Database:
     def commit(self):
         self.conn.commit()
 
-    def create_tables(self):        
+    def create_tables(self):
         # height, time, txs_ids
         self.cur.execute(
             """CREATE TABLE IF NOT EXISTS blocks (height INTEGER PRIMARY KEY, time TEXT, txs TEXT)"""
         )
 
-        # txs: id int primary key auto inc, height, tx_amino, msg_types, tx_json        
+        # txs: id int primary key auto inc, height, tx_amino, msg_types, tx_json
         self.cur.execute(
             """CREATE TABLE IF NOT EXISTS txs (id INTEGER PRIMARY KEY AUTOINCREMENT, height INTEGER, tx_amino TEXT, msg_types TEXT, tx_json TEXT, address TEXT)"""
         )
@@ -32,12 +32,12 @@ class Database:
         # )
 
         # messages: message_type, height, count
-        # This may be extra? We could just iter txs but I guess it depends. Can add in the future        
+        # This may be extra? We could just iter txs but I guess it depends. Can add in the future
         # NOTE: Getting just the count is dumb. If we were to redo this it should be the Tx IDs
         # self.cur.execute(
         #     # This was updated in the migrations.txt on current db
         #     """CREATE TABLE IF NOT EXISTS messages (message TEXT, height INTEGER, count INTEGER)"""
-        # )        
+        # )
 
         self.commit()
 
@@ -46,12 +46,14 @@ class Database:
         # self.cur.execute("""VACUUM""")
 
         # for blocks, create an index at height
-        self.cur.execute("""CREATE INDEX IF NOT EXISTS blocks_height ON blocks (height)""")
+        self.cur.execute(
+            """CREATE INDEX IF NOT EXISTS blocks_height ON blocks (height)"""
+        )
 
         # index txs by id & height
         self.cur.execute(
             """CREATE INDEX IF NOT EXISTS txs_id_height ON txs (id, height, address)"""
-        )  
+        )
 
         # index messages by height
         # self.cur.execute("""CREATE INDEX IF NOT EXISTS messages_height ON messages (height)""")
@@ -60,19 +62,18 @@ class Database:
         # self.cur.execute("""CREATE INDEX IF NOT EXISTS users_height ON users (height)""")
 
         self.commit()
-    
+
     def optimize_db(self, vacuum: bool = False):
         # self.optimize_tables()
         # Set journal mode to WAL. - https://charlesleifer.com/blog/going-fast-with-sqlite-and-python/
-        self.cur.execute("""PRAGMA journal_mode=WAL""")        
-        # self.cur.execute("""PRAGMA synchronous=OFF""") # off? or normal?        
-        self.cur.execute("""PRAGMA mmap_size=30000000000""")        
+        self.cur.execute("""PRAGMA journal_mode=WAL""")
+        # self.cur.execute("""PRAGMA synchronous=OFF""") # off? or normal?
+        self.cur.execute("""PRAGMA mmap_size=30000000000""")
         self.cur.execute(f"""PRAGMA page_size=32768""")
         if vacuum:
-            self.cur.execute("""VACUUM""")        
+            self.cur.execute("""VACUUM""")
             self.cur.execute("""PRAGMA optimize""")
         self.commit()
-
 
     def get_indexes(self):
         self.cur.execute("""SELECT name FROM sqlite_master WHERE type='index';""")
@@ -205,7 +206,7 @@ class Database:
 
         return list(txs)
     '''
-    
+
     # ===================================
     # Blocks
     # ===================================
@@ -216,7 +217,7 @@ class Database:
             """INSERT INTO blocks (height, time, txs) VALUES (?, ?, ?)""",
             (height, time, json.dumps(txs_ids)),
         )
-    
+
     def get_block(self, block_height: int) -> Block | None:
         self.cur.execute(
             """SELECT * FROM blocks WHERE height=?""",
@@ -224,7 +225,7 @@ class Database:
         )
         data = self.cur.fetchone()
         if data is None:
-            return None    
+            return None
 
         return Block(data[0], data[1], json.loads(data[2]))
 
@@ -233,7 +234,7 @@ class Database:
         data = self.cur.fetchone()
         if data is None:
             return None
-        
+
         return Block(data[0], data[1], json.loads(data[2]))
 
     def get_latest_saved_block(self) -> Block | None:
@@ -315,10 +316,12 @@ class Database:
         txs: list[Tx] = []
         for x in data:
             txs.append(Tx(x[0], x[1], x[2], x[3], x[4], x[5]))
-        
+
         return txs
-    
-    def get_non_decoded_txs_in_range(self, start_height: int, end_height: int) -> list[Tx]:
+
+    def get_non_decoded_txs_in_range(
+        self, start_height: int, end_height: int
+    ) -> list[Tx]:
         # returns all txs which have not been decoded in the json field. This field is "" if not decoded
         self.cur.execute(
             """SELECT * FROM txs WHERE height BETWEEN ? AND ?""",
@@ -327,11 +330,11 @@ class Database:
         data = self.cur.fetchall()
         if data is None:
             return []
-        
+
         txs: list[Tx] = []
         for x in data:
-            # check if tx_json is "", if so, add it to the array            
-            if x[4] == "":
+            # check if tx_json is "", if so, add it to the array
+            if len(x[4]) == 0:
                 txs.append(Tx(x[0], x[1], x[2], x[3], x[4], x[5]))
 
         return txs
@@ -343,7 +346,7 @@ class Database:
     #     if latest_block is None:
     #         print("No (latest) blocks saved in Database")
     #         return []
-        
+
     #     if end_height > latest_block.height:
     #         end_height = latest_block.height
 
@@ -354,11 +357,11 @@ class Database:
     #         """SELECT tx_id FROM users WHERE address=? AND height BETWEEN ? AND ?""",
     #         (address, start_height, end_height),
     #     )
-    #     data = self.cur.fetchall()        
+    #     data = self.cur.fetchall()
 
     #     if data is None:
     #         return []
-        
+
     #     txs = []
     #     for values in data:
     #         tx = self.get_tx(values[2])
