@@ -304,18 +304,30 @@ def do_decode(lowest_height: int, highest_height: int):
 
     if highest_height - lowest_height <= COSMOS_PROTO_DECODE_BLOCK_LIMIT:
         groups.append(DecodeGroup(lowest_height - 1, highest_height))
+        print(f"Group: {lowest_height-1}->{highest_height}")
     else:
-        while lowest_height <= highest_height:
-            group_end = min(
-                lowest_height + COSMOS_PROTO_DECODE_BLOCK_LIMIT - 1, highest_height
+        for i in range(
+            ((highest_height - lowest_height) // COSMOS_PROTO_DECODE_BLOCK_LIMIT + 1)
+            - 1
+        ):
+            groups.append(
+                DecodeGroup(
+                    lowest_height + i * COSMOS_PROTO_DECODE_BLOCK_LIMIT,
+                    lowest_height + (i + 1) * COSMOS_PROTO_DECODE_BLOCK_LIMIT,
+                )
             )
-            groups.append(DecodeGroup(lowest_height , group_end))
 
         # add the final group as the difference
         if len(groups) > 0 and groups[-1].end < highest_height:
             groups.append(DecodeGroup(groups[-1].end, highest_height))
 
     print(f"Groups: {len(groups):,}")
+    print(f"Total Blocks: {highest_height - lowest_height:,}")
+
+    # # print group content
+    # for group in groups:
+    #     print(f"Group: {group.start}->{group.end}")
+    # exit(1)
 
     latest_block = db.get_latest_saved_block()
     if latest_block is None:
