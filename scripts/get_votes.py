@@ -5,13 +5,15 @@ Then will compare these to num,ber of accounts with more than 0.01 JUNO balance 
 
 import json
 import os
+import sys
+
+current_dir = os.path.dirname(os.path.realpath(__file__))
+parent = os.path.dirname(current_dir)
+sys.path.append(parent)
 
 from SQL import Database
 
-current_dir = os.path.dirname(os.path.realpath(__file__))
-
-
-db = Database(os.path.join(current_dir, "data.db"))
+db = Database(os.path.join(current_dir, os.path.join(parent, "data.db")))
 
 latest_block = db.get_latest_saved_block()
 if latest_block is None:
@@ -26,7 +28,7 @@ print(f"Total Txs: {len(all_txs):,}")
 
 # address: vote
 voters: dict[str, str] = {}
-proposal_id = "284"
+proposal_id = "282"
 
 # go through all Txs and get where msg_types is a vote message. If a user revotes, it overrides their last one
 for tx in all_txs:
@@ -43,7 +45,6 @@ for tx in all_txs:
                     voters[msg["voter"]] = msg["option"]
 
 # dump voters
-# with open(f"voters_{proposal_id}.json", "w") as f:
 print(f"Voters: {len(voters):,}")
 with open(os.path.join(current_dir, f"voters_{proposal_id}.json"), "w") as f:
     json.dump(voters, f, indent=2)
