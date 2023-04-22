@@ -1,5 +1,6 @@
 import json
 import sqlite3
+import time
 
 from chain_types import Block, Tx
 
@@ -304,18 +305,36 @@ class Database:
         return Tx(data[0], data[1], data[2], data[3], data[4], data[5])
 
     def get_txs_in_range(self, start_height: int, end_height: int) -> list[Tx]:
-        # What if end_height > saved, we are good yes?
-        self.cur.execute(
-            """SELECT * FROM txs WHERE height BETWEEN ? AND ?""",
-            (start_height, end_height),
-        )
-        data = self.cur.fetchall()
-        if data is None:
-            return []
+        start = time.time()
+
+        tx_ids = {}
+        # print("Getting txs ids from blocks")
+        for block_index in range(start_height, end_height + 1):
+            b = self.get_block(block_index)
+            if b:
+                for tx_id in b.tx_ids:
+                    tx_ids[tx_id] = True
 
         txs: list[Tx] = []
-        for x in data:
-            txs.append(Tx(x[0], x[1], x[2], x[3], x[4], x[5]))
+        # print("Getting Txs from found tx_ids")
+        for tx_id in tx_ids:
+            _tx = self.get_tx(tx_id)
+            if _tx:
+                txs.append(_tx)
+
+        # This is ~3.5x slower than above
+        # self.cur.execute(
+        #     """SELECT * FROM txs WHERE height BETWEEN ? AND ?""",
+        #     (start_height, end_height),
+        # )
+        # data = self.cur.fetchall()
+        # if data is None:
+        #     return []
+        # txs: list[Tx] = []
+        # for x in data:
+        #     txs.append(Tx(x[0], x[1], x[2], x[3], x[4], x[5]))
+
+        # print(f"Got {len(txs)} txs in {time.time() - start} seconds")
 
         return txs
 
