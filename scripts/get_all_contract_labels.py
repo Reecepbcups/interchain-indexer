@@ -30,7 +30,7 @@ if latest_block is None:
     exit(1)
 
 # Block Range
-START_BLOCK = latest_block.height - 1_000_000
+START_BLOCK = 1
 END_BLOCK = latest_block.height
 
 
