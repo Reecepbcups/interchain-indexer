@@ -1,4 +1,24 @@
-# cosmos-indexer
+# Cosmos Indexer
+
+## Past Index Archive Download
+
+- <https://reece.sh/private/juno/juno_index_1-7839000.tar.gz>
+- SQLite data.db - 11.4GB Compressed, 51GB de-compressed. *(Blocks 1-7839000, missing 2578098 and 4136531 per halts)*
+
+## Snapshot Export Data
+
+- <https://exports.reece.sh/juno> (Bank, Staking, and Sequence exports every 20k blocks)
+
+## Compression & Decompression
+
+```bash
+# compressed
+tar -czvf network_start-end.tar.gz data.db
+# decompressed
+tar -xzvf name-of-archive.tar.gz
+```
+
+---
 
 ## Getting Started
 
@@ -20,20 +40,5 @@ python3 main.py 1
 ## Notes
 
 ```text
-- Addresses of UNKOWN are for MultiSendMessages. These Messages do not contain the actual address. There are only a few.
-- Blocks 2578098 and 4136531 are missing due to skipping on upgrades. Should I put empty Block data here?
-```
-
-## Archive Downloads:
-
-- TODO
-
-## Compression & Decompression
-
-```bash
-# compressed
-tar -czvf juno_start-end.tar.gz data.db
-
-# decompressed
-tar -xzvf name-of-archive.tar.gz
+- Addresses of UNKOWN are for MultiSendMessages. These Messages do not contain the actual addresses.
 ```

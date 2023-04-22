@@ -5,6 +5,7 @@
     "WALLET_PREFIX": "juno1",
     "VALOPER_PREFIX": "junovaloper1",
 
+    "_possible_task_list": "download,decode,missing,and sync",
     "TASK": "download",
     "sections": {
         "0": {
