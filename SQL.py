@@ -3,6 +3,7 @@ import sqlite3
 import time
 
 from chain_types import Block, Tx
+from util import txraw_to_hash
 
 
 class Database:
@@ -24,7 +25,7 @@ class Database:
 
         # txs: id int primary key auto inc, height, tx_amino, msg_types, tx_json
         self.cur.execute(
-            """CREATE TABLE IF NOT EXISTS txs (id INTEGER PRIMARY KEY AUTOINCREMENT, height INTEGER, tx_amino TEXT, msg_types TEXT, tx_json TEXT, address TEXT)"""
+            """CREATE TABLE IF NOT EXISTS txs (id INTEGER PRIMARY KEY AUTOINCREMENT, height INTEGER, tx_amino TEXT, msg_types TEXT, tx_json TEXT, address TEXT, tx_hash TEXT)"""
         )
 
         # users: address, height, tx_id
@@ -45,22 +46,17 @@ class Database:
     def optimize_tables(self):
         # Only runs this after we have saved values
         # self.cur.execute("""VACUUM""")
+        # NOTE: If you need to add a new index, you must drop then create a new index.
 
-        # for blocks, create an index at height
+        # Blocks indexes. Maybe index Tx ids? Not sure how that will work with being an array.
         self.cur.execute(
             """CREATE INDEX IF NOT EXISTS blocks_height ON blocks (height)"""
         )
 
-        # index txs by id & height
+        # Transactions
         self.cur.execute(
-            """CREATE INDEX IF NOT EXISTS txs_id_height ON txs (id, height, address)"""
+            """CREATE INDEX IF NOT EXISTS txs_data_index ON txs (id, height, address, tx_hash)"""
         )
-
-        # index messages by height
-        # self.cur.execute("""CREATE INDEX IF NOT EXISTS messages_height ON messages (height)""")
-
-        # index users by height
-        # self.cur.execute("""CREATE INDEX IF NOT EXISTS users_height ON users (height)""")
 
         self.commit()
 
@@ -280,9 +276,11 @@ class Database:
         # insert the height and tx_amino, then return the unique id
         # fill the other collums with empty strings
         # """CREATE TABLE IF NOT EXISTS txs (id INTEGER PRIMARY KEY AUTOINCREMENT, height INTEGER, tx_amino TEXT, msg_types TEXT, tx_json TEXT, address TEXT)"""
+
+        tx_hash = txraw_to_hash(tx_amino)
         self.cur.execute(
-            """INSERT INTO txs (height, tx_amino, msg_types, tx_json, address) VALUES (?, ?, ?, ?, ?)""",
-            (height, tx_amino, "", "", ""),
+            """INSERT INTO txs (height, tx_amino, msg_types, tx_json, address, tx_hash) VALUES (?, ?, ?, ?, ?, ?)""",
+            (height, tx_amino, "", "", "", tx_hash),
         )
         return self.cur.lastrowid
 
@@ -293,6 +291,24 @@ class Database:
             (tx_json, msg_types, address, _id),
         )
 
+    def update_tx_hash(self, _id: int, tx_hash: str):
+        # This is only used for the migration to add this section.
+        self.cur.execute(
+            """UPDATE txs SET tx_hash=? WHERE id=?""",
+            (tx_hash, _id),
+        )
+
+    def get_tx_by_hash(self, tx_hash: str) -> Tx | None:
+        self.cur.execute(
+            """SELECT id FROM txs WHERE tx_hash=?""",
+            (tx_hash,),
+        )
+        data = self.cur.fetchone()
+        if data is None:
+            return None
+
+        return self.get_tx(data[0])
+
     def get_tx(self, tx_id: int) -> Tx | None:
         self.cur.execute(
             """SELECT * FROM txs WHERE id=?""",
@@ -302,8 +318,17 @@ class Database:
         if data is None:
             return None
 
-        return Tx(data[0], data[1], data[2], data[3], data[4], data[5])
+        return Tx(data[0], data[1], data[2], data[3], data[4], data[5], data[6] or "")
 
+    def get_last_saved_tx(self) -> Tx | None:
+        self.cur.execute("""SELECT id FROM txs ORDER BY id DESC LIMIT 1""")
+        data = self.cur.fetchone()
+        if data is None:
+            return None
+
+        return self.get_tx(data[0])
+
+    # Rename this to _in_block_range. As a user could also _in_id_range
     def get_txs_in_range(self, start_height: int, end_height: int) -> list[Tx]:
         start = time.time()
 
@@ -354,7 +379,7 @@ class Database:
         for x in data:
             # check if tx_json is "", if so, add it to the array
             if len(x[4]) == 0:
-                txs.append(Tx(x[0], x[1], x[2], x[3], x[4], x[5]))
+                txs.append(Tx(x[0], x[1], x[2], x[3], x[4], x[5], x[6]))
 
         return txs
 

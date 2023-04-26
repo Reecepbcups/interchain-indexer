@@ -7,6 +7,7 @@ class BlockData:
     block_time: str
     encoded_txs: list[str]
 
+
 @dataclass
 class DecodeGroup:
     start: int
@@ -19,11 +20,13 @@ class Block:
     time: str
     tx_ids: list[int]
 
+
 @dataclass
 class Tx:
     id: int
     height: int
     tx_amino: str
-    msg_types: list[str] # JSON.load
+    msg_types: list[str]  # JSON.load
     tx_json: str
     address: str
+    tx_hash: str
