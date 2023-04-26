@@ -1,3 +1,5 @@
+import base64
+import hashlib
 import json
 import os
 from shutil import which
@@ -5,6 +7,16 @@ from shutil import which
 import httpx
 
 current_dir = os.path.dirname(os.path.realpath(__file__))
+
+
+def txraw_to_hash(tx_raw_amino: str) -> str:
+    """
+    Converts a base txRaw string into the tx hash on chain. Useful to query with
+    appd q tx <hash>, an RPC, or via mintscan.io
+    """
+    decoded_bytes = base64.b64decode(tx_raw_amino)
+    tx_hash = hashlib.sha256(decoded_bytes).hexdigest()
+    return tx_hash.upper()
 
 
 def run_decode_file(
@@ -24,7 +36,9 @@ def command_exists(cmd):
     return True
 
 
-def get_sender(height:int, msg: dict, WALLET_PREFIX: str, VALOPER_PREFIX: str) -> str | None:
+def get_sender(
+    height: int, msg: dict, WALLET_PREFIX: str, VALOPER_PREFIX: str
+) -> str | None:
     # MultibankSend not yet supported
     keys = [
         "sender",
