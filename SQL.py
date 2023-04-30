@@ -320,6 +320,26 @@ class Database:
 
         return Tx(data[0], data[1], data[2], data[3], data[4], data[5], data[6] or "")
 
+    def get_txs_by_ids(self, tx_lower_id: int, tx_upper_id: int) -> list[Tx]:
+        txs: list[Tx] = []
+
+        if tx_lower_id == tx_upper_id or tx_lower_id > tx_upper_id:
+            print("error, tx_lower_id == tx_upper_id or tx_lower_id > tx_upper_id")
+            return txs
+
+        self.cur.execute(
+            """SELECT * FROM txs WHERE id BETWEEN ? AND ?""",
+            (tx_lower_id, tx_upper_id),
+        )
+        data = self.cur.fetchall()
+        if data is None:
+            return txs
+
+        for tx in data:
+            txs.append(Tx(tx[0], tx[1], tx[2], tx[3], tx[4], tx[5], tx[6] or ""))
+
+        return txs
+
     def get_last_saved_tx(self) -> Tx | None:
         self.cur.execute("""SELECT id FROM txs ORDER BY id DESC LIMIT 1""")
         data = self.cur.fetchone()
