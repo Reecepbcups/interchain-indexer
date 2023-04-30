@@ -42,3 +42,41 @@ python3 main.py 1
 ```text
 - Addresses of UNKOWN are for MultiSendMessages. These Messages do not contain the actual addresses.
 ```
+
+## Sections
+```json
+    "sections": {
+        "genesis": {
+            "start": 1,
+            "end": 2579000,
+            "grouping": 1000,
+            "rpc_endpoints": [
+                "https://rpc-v2-archive.junonetwork.io:443"
+            ]
+        },
+        "2nd": {
+            "start": 2578000,
+            "end": 4136600,
+            "grouping": 1,
+            "rpc_endpoints": [
+                "https://rpc-v3-archive.junonetwork.io:443"
+            ]
+        },
+        "end1": {
+            "start": 4136500,
+            "end": 6000000,
+            "grouping": 1000,
+            "rpc_endpoints": [
+                "https://rpc-archive.junonetwork.io:443"
+            ]
+        },
+        "end2": {
+            "start": 6000000,
+            "end": 8000000,
+            "grouping": 1000,
+            "rpc_endpoints": [
+                "https://rpc-archive.junonetwork.io:443"
+            ]
+        }
+    }
+```

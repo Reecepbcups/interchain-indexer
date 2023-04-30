@@ -54,6 +54,10 @@ if not command_exists(COSMOS_PROTO_DECODER_BINARY_FILE):
     print(f"Command {COSMOS_PROTO_DECODER_BINARY_FILE} not found")
     exit(1)
 
+# The length of amino to cut off at. If it is longer than this, it will not be decoded.
+# This helps to ignore large msgs such as IBC Txs and store codes
+TX_AMINO_LENGTH_CUTTOFF_LIMIT = chain_config.get("TX_AMINO_LENGTH_CUTTOFF_LIMIT", 0)
+
 WALLET_PREFIX = chain_config.get("WALLET_PREFIX", "juno1")
 VALOPER_PREFIX = chain_config.get("VALOPER_PREFIX", "junovaloper1")
 
@@ -124,10 +128,9 @@ async def download_block(client: httpx.AsyncClient, height: int) -> BlockData | 
     # Removes CosmWasm store_codes
     amino_txs = []
     for x in encoded_block_txs:
-        if len(x) < 10_000:
-            # ignores store codes & IBC client update Txs (massive)
-            # in 100k blocks (7m height) storage went from 30mb to 5.5mb.
+        if len(x) <= TX_AMINO_LENGTH_CUTTOFF_LIMIT:
             amino_txs.append(x)
+            continue
 
     return BlockData(height, block_time, amino_txs)
 
