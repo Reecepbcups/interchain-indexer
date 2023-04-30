@@ -33,15 +33,26 @@ with open(os.path.join(current_dir, "all_validators.json"), "r") as f:
 
 # For delegations subdao
 START_BLOCK = 5779678
-END_BLOCK = 7990650
+END_BLOCK = 7075551  # proposal 249
 
 # just ended voting period at start block
-IGNORE_PROPOSAL_IDS = ["54"]
+# TODO: Future, query the rest api for all voted on proposals which are not deposit period.
+IGNORE_PROPOSAL_IDS = [
+    "7",
+    "54",  # end of voting period at start block
+    "56",  # spam
+    "58",  # spam
+    "62",  # spam
+    "78",  # spam
+    "84",  # spam
+    "88",  # spam
+    "94",  # spam
+]
 
 all_txs = db.get_txs_in_range(START_BLOCK, END_BLOCK)
 
 
-all_proposals_during_time: list[int] = []
+all_proposals_during_time = set()
 
 # valaddr: [proposal_1, proposal_3, ...]
 validator_voters: dict[str, list[int]] = {}
@@ -51,7 +62,6 @@ for tx in all_txs:
     if len(tx.msg_types) == 0:
         continue
 
-    # print(tx.msg_types)
     if "MsgVote" in tx.msg_types:
         _json = json.loads(tx.tx_json)
         for msg in _json["body"]["messages"]:
@@ -72,7 +82,7 @@ for tx in all_txs:
                     validator_voters[voter] = []
 
                 if proposal_id not in all_proposals_during_time:
-                    all_proposals_during_time.append(int(proposal_id))
+                    all_proposals_during_time.add(int(proposal_id))
 
                 # ensure proposal_id is not already in list
                 if proposal_id not in validator_voters[voter]:
@@ -93,7 +103,7 @@ for val, proposals in validator_voters.items():
         "percent": round((len(proposals) / len(all_proposals_during_time)) * 100, 2),
     }
 
-all_proposals_during_time = sorted(all_proposals_during_time)
+all_proposals = sorted(list(all_proposals_during_time))
 
 with open(
     os.path.join(
@@ -103,8 +113,8 @@ with open(
 ) as f:
     json.dump(
         {
-            "proposals_during_time": all_proposals_during_time,
-            "proposals_amount": len(list(all_proposals_during_time)),
+            "proposals_during_time": all_proposals,
+            "proposals_amount": len(list(all_proposals)),
             "validators": output,
         },
         f,
