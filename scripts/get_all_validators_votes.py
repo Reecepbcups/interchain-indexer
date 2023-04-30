@@ -33,6 +33,7 @@ with open(os.path.join(current_dir, "all_validators.json"), "r") as f:
 
 # For delegations subdao
 START_BLOCK = 5779678
+# END_BLOCK = START_BLOCK + 150_000
 END_BLOCK = 7075551  # proposal 249
 
 # just ended voting period at start block
@@ -62,31 +63,42 @@ for tx in all_txs:
     if len(tx.msg_types) == 0:
         continue
 
-    if "MsgVote" in tx.msg_types:
-        _json = json.loads(tx.tx_json)
-        for msg in _json["body"]["messages"]:
-            if msg["@type"] in [
-                "/cosmos.gov.v1beta1.MsgVote",
-                "/cosmos.gov.v1beta1.MsgVoteWeighted",
-            ]:
-                voter = msg["voter"]
-                proposal_id = msg["proposal_id"]
+    # [{'@type': '/cosmos.gov.v1beta1.MsgVote', 'proposal_id': '57', 'voter': 'juno1k0hmfxjj3thuc47057cxuhxneu8rmseudyg9dd', 'option': 'VOTE_OPTION_YES'}]
+    vote_msgs: list[dict] = []
 
-                if proposal_id in IGNORE_PROPOSAL_IDS:
-                    continue
+    # Gets vote messages in this Tx. Both direct & as authz.
+    if "/cosmos.authz.v1beta1.MsgExec" in tx.msg_types or "MsgVote" in tx.msg_types:
+        for msg in json.loads(tx.tx_json)["body"]["messages"]:
+            # print(msg)
+            if "MsgVote" in msg["@type"]:
+                vote_msgs.append(msg)
 
-                if voter not in all_validators.keys():
-                    continue
+            elif "/cosmos.authz.v1beta1.MsgExec" in msg["@type"]:
+                # dict_keys(['@type', 'grantee', 'msgs'])
+                for sub_msg in msg["msgs"]:
+                    if "MsgVote" in sub_msg["@type"]:
+                        vote_msgs.append(sub_msg)
 
-                if voter not in validator_voters.keys():
-                    validator_voters[voter] = []
+    for msg in vote_msgs:
+        voter = msg["voter"]
+        proposal_id = msg["proposal_id"]
+        # option = msg["option"]
 
-                if proposal_id not in all_proposals_during_time:
-                    all_proposals_during_time.add(int(proposal_id))
+        if proposal_id in IGNORE_PROPOSAL_IDS:
+            continue
 
-                # ensure proposal_id is not already in list
-                if proposal_id not in validator_voters[voter]:
-                    validator_voters[voter].append(proposal_id)
+        if voter not in all_validators.keys():
+            continue
+
+        if voter not in validator_voters.keys():
+            validator_voters[voter] = []
+
+        if proposal_id not in all_proposals_during_time:
+            all_proposals_during_time.add(int(proposal_id))
+
+        # ensure proposal_id is not already in list
+        if proposal_id not in validator_voters[voter]:
+            validator_voters[voter].append(proposal_id)
 
 # dump voters
 print(f"Validator voters: {len(validator_voters):,}")
