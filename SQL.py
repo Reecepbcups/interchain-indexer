@@ -320,6 +320,27 @@ class Database:
 
         return Tx(data[0], data[1], data[2], data[3], data[4], data[5], data[6] or "")
 
+    def get_tx_specific(self, tx_id: int, fields: list[str]):
+        self.cur.execute(
+            f"""SELECT {','.join(fields)} FROM txs WHERE id=?""",
+            (tx_id,),
+        )
+        data = self.cur.fetchone()
+        if data is None:
+            return None
+
+        # save fields in a dict
+        tx = {}
+        for i in range(len(fields)):
+            tx[fields[i]] = data[i]
+
+        # fill in the missing fields with empty strings
+        for tx_type in Tx.__annotations__.keys():
+            if tx_type not in tx:
+                tx[tx_type] = ""
+
+        return Tx(**tx)
+
     def get_txs_by_ids(self, tx_lower_id: int, tx_upper_id: int) -> list[Tx]:
         txs: list[Tx] = []
 
