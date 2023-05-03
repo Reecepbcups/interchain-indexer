@@ -2,6 +2,8 @@
 Gets gas and fees est. over time
 
 For: https://twitter.com/luisqagt/status/1653510347322531843?s=20
+
+Final Calulation: https://gist.github.com/Reecepbcups/a300c9973bec1de595eb371f9ddc2dd0 (Up to block 8 million)
 """
 import json
 import os
