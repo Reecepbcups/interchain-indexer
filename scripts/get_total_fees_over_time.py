@@ -9,8 +9,6 @@ import json
 import os
 import sys
 
-from attr import dataclass
-
 current_dir = os.path.dirname(os.path.realpath(__file__))
 parent = os.path.dirname(current_dir)
 sys.path.append(parent)
@@ -44,22 +42,15 @@ seconds_in_a_day = 86_400
 blocks_in_a_week = (seconds_in_a_day * 7) / 6
 
 
-@dataclass
-class Fee:
-    denom: str
-    amount: int
-
-    def toJson(self):
-        return {"denom": self.denom, "amount": self.amount}
-
-
 # weekend_height_key: [{"ujuno": 10000}]
-total_fees_paid: dict[int, dict[str, int]] = {}
+total_fees_paid: dict[int, dict[str, float]] = {}
 total_ujuno_fees_paid_lifetime = 0
+
+# height key : amount
+total_txs_per_week: dict[int, int] = {}
 
 # height where its based off the week
 total_fees_paid = {k: {} for k in range(1, 30_000_000, int(blocks_in_a_week))}
-print(total_fees_paid)
 
 
 def find_closest_key(target_key):
@@ -79,12 +70,11 @@ for i in range(1, last_tx_saved.id):
 
     height = tx.height
     tx_json = json.loads(tx.tx_json)
+    fees = tx_json["auth_info"]["fee"]["amount"]
 
     if tx.id % 50_000 == 0:
         # print(f"Tx {i:,}")
-        print(f"TxId:{tx.id}")
-
-    fees = tx_json["auth_info"]["fee"]["amount"]
+        print(f"TxId:{tx.id:,}")
 
     # get the closes key value from total_fees_paid to height
     closest_key = find_closest_key(height)
@@ -92,7 +82,11 @@ for i in range(1, last_tx_saved.id):
     if closest_key not in total_fees_paid:
         total_fees_paid[closest_key] = {}
 
-    tmp_height = total_fees_paid[closest_key]
+    if closest_key not in total_txs_per_week:
+        total_txs_per_week[closest_key] = 0
+
+    total_txs_per_week[closest_key] += 1
+
     for fee in fees:
         denom = fee["denom"]
         amount = int(fee["amount"])
@@ -103,23 +97,20 @@ for i in range(1, last_tx_saved.id):
         if denom == "ujuno":
             total_ujuno_fees_paid_lifetime += amount
 
-        if denom not in tmp_height:
-            tmp_height[denom] = 0
+        if denom not in total_fees_paid[closest_key]:
+            total_fees_paid[closest_key][denom] = 0
 
-        tmp_height[denom] += amount
-
-    total_fees_paid[closest_key] = tmp_height
-
-
-# print(last_tx_saved)
-
+        total_fees_paid[closest_key][denom] += amount
 
 total_fees_paid = {k: v for k, v in total_fees_paid.items() if v != {}}
+# sort keys total_txs_per_week
+total_txs_per_week = dict(sorted(total_txs_per_week.items()))
 with open(os.path.join(current_dir, "all_fees_over_time.json"), "w") as f:
     json.dump(
         {
             "total_ujuno_fees": total_ujuno_fees_paid_lifetime,
             "weekly_fees": total_fees_paid,
+            "weekly_txs": total_txs_per_week,
         },
         f,
         indent=4,
