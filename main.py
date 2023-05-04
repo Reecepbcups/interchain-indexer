@@ -127,10 +127,11 @@ async def download_block(client: httpx.AsyncClient, height: int) -> BlockData | 
 
     # Removes CosmWasm store_codes
     amino_txs = []
-    for x in encoded_block_txs:
-        if len(x) <= TX_AMINO_LENGTH_CUTTOFF_LIMIT:
-            amino_txs.append(x)
-            continue
+    if TX_AMINO_LENGTH_CUTTOFF_LIMIT > 0:
+        for x in encoded_block_txs:
+            if len(x) <= TX_AMINO_LENGTH_CUTTOFF_LIMIT:
+                amino_txs.append(x)
+                continue
 
     return BlockData(height, block_time, amino_txs)
 
