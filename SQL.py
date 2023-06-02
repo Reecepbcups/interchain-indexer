@@ -341,6 +341,31 @@ class Database:
 
         return Tx(**tx)
 
+    def get_txs_from_address_in_range(self, address: str) -> list[dict]:
+        txs: list[dict] = []
+
+        print("Starting to wait...")
+        # get just height,tx_json from txs where the address = address
+        self.cur.execute(
+            """SELECT height FROM txs WHERE address=?""",
+            (address,),
+        )
+
+        data = self.cur.fetchall()
+
+        print("Done...")
+
+        if data is None:
+            print("No data")
+            return txs
+
+        print("For Loop")
+        for tx in data:
+            txs.append({"height": tx[0], "tx_json": tx[1]})
+
+        print("Return")
+        return txs
+
     def get_txs_by_ids(self, tx_lower_id: int, tx_upper_id: int) -> list[Tx]:
         txs: list[Tx] = []
 
