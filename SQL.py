@@ -1,57 +1,109 @@
+import base64
+import inspect
 import json
 import sqlite3
 import time
+from enum import Enum
+from typing import Any
+
+import regex
 
 from chain_types import Block, Tx
-from util import txraw_to_hash
+from util import _decode_single_test, get_sender, run_decode_file, txraw_to_hash
+
+# ?
+IGNORED_CONTRACTS = {
+    "ojo oracle": "juno1yqm8q56hjv8sd4r37wdhkkdt3wu45gc5ptrjmd9k0nhvavl0354qwcf249"
+}
+
+# matches `/cosmwasm.wasm.v1.SomeMsgHere` in the amino of a tx
+AMINO_MESSAGE_REGEX = regex.compile(
+    b"\/[a-zA-Z0-9]*\.[a-zA-Z0-9]*\.[a-zA-Z0-9]*\.[a-zA-Z0-9]*"
+)
+
+
+class TxOptions(Enum):
+    # These should match up with the colum names in the table
+    ID = "id"
+    HEIGHT = "height"
+    AMINO = "tx_amino"
+    TX_JSON = "tx_json"
+    MSG_TYPES = "msg_types"
+    ADDRESS = "address"
+    TX_HASH = "tx_hash"
+
+
+class BlockOption(Enum):
+    STANDARD = "standard"
+    EARLIEST = "earliest"
+    LATEST = "latest"
+
+
+class TxQueryOption(Enum):
+    STANDARD = "standard"
+    EARLIEST = "earliest"
+    LATEST = "latest"
 
 
 class Database:
     def __init__(self, db: str):
         self.conn = sqlite3.connect(db)
         self.cur = self.conn.cursor()
-        # self.optimize_db(vacuum=False) # never run vacuum here
-        # self.cur.execute("""PRAGMA temp_store=MEMORY""")
-        # self.optimize_tables()
 
     def commit(self):
         self.conn.commit()
 
+    def execute(
+        self,
+        cmds: str | list[str],
+        commit=False,
+        resp=False,
+        resp_one=False,
+    ) -> list[Any]:
+        if type(cmds) == str:
+            cmds = [cmds]
+
+        for cmd in cmds:
+            self.cur.execute(cmd)
+
+        if commit:
+            self.commit()
+
+        if resp_one:
+            return self.cur.fetchone()
+        if resp:
+            return self.cur.fetchall()
+
+        return []
+
     def create_tables(self):
-        self.cur.execute(
-            # TODO: msg_types json array should have an auto generated index fropm the `json`->> thing with a join or something?
-            """CREATE TABLE IF NOT EXISTS blocks (height serial PRIMARY KEY, date DATETIME NOT NULL, txs json, msg_types json)"""
-        )
-
-        self.cur.execute(
-            """CREATE TABLE IF NOT EXISTS transactions (id serial PRIMARY KEY, height INT, tx_json json, address VARCHAR(50), tx_hash VARCHAR(64))"""
-        )
-
-        # tx_amino table stores: tx_amino BLOB with the tx_id of the parent transaction (forign key)
-        self.cur.execute(
-            """CREATE TABLE IF NOT EXISTS amino_tx (tx_id INT PRIMARY KEY, tx_amino BLOB, FOREIGN KEY(tx_id) REFERENCES transactions(id))"""
-        )
-
         # store json blob off as well?
-
+        self.execute(
+            [
+                """CREATE TABLE IF NOT EXISTS blocks (height INTEGER PRIMARY KEY, date DATETIME NOT NULL, txs TEXT)""",
+                """CREATE TABLE IF NOT EXISTS txs (id INTEGER PRIMARY KEY AUTOINCREMENT, height INT, msg_types BLOB, address VARCHAR(50), tx_hash VARCHAR(64) UNIQUE)""",
+                # tx subgroups
+                """CREATE TABLE IF NOT EXISTS amino_tx (id INTEGER PRIMARY KEY AUTOINCREMENT, tx_amino BLOB, FOREIGN KEY(id) REFERENCES transactions(id))""",
+                # json tx
+                """CREATE TABLE IF NOT EXISTS json_tx (id INTEGER PRIMARY KEY AUTOINCREMENT, tx_json BLOB, FOREIGN KEY(id) REFERENCES transactions(id))""",
+                # TODO:
+                """CREATE TABLE IF NOT EXISTS tx_events (id INTEGER PRIMARY KEY AUTOINCREMENT, event_json BLOB, FOREIGN KEY(id) REFERENCES transactions(id))""",
+            ]
+        )
         self.commit()
 
     def optimize_tables(self):
-        # Blocks
-        self.cur.execute(
-            """CREATE INDEX IF NOT EXISTS blocks_height ON blocks (height)"""
-        )
-        self.cur.execute("""CREATE INDEX IF NOT EXISTS blocks_date ON blocks (date)""")
-
-        # Transactions
-        self.cur.execute(
-            """CREATE INDEX IF NOT EXISTS transactions_height ON transactions (height)"""
-        )
-        self.cur.execute(
-            """CREATE INDEX IF NOT EXISTS transactions_tx_hash ON transactions (tx_hash)"""
-        )
-        self.cur.execute(
-            """CREATE INDEX IF NOT EXISTS transactions_address ON transactions (address)"""
+        self.execute(
+            [
+                # Blocks
+                """CREATE INDEX IF NOT EXISTS height ON blocks (height)""",
+                """CREATE INDEX IF NOT EXISTS date ON blocks (date)""",
+                # txs
+                """CREATE INDEX IF NOT EXISTS height ON txs (height)""",
+                """CREATE INDEX IF NOT EXISTS tx_hash ON txs (tx_hash)""",
+                """CREATE INDEX IF NOT EXISTS address ON txs (address)""",
+                """CREATE INDEX IF NOT EXISTS msg_types ON txs (msg_types->'$.[]')""",  # ??
+            ]
         )
 
         # Tx Amino
@@ -62,298 +114,489 @@ class Database:
     def optimize_db(self, vacuum: bool = False):
         # self.optimize_tables()
         # Set journal mode to WAL. - https://charlesleifer.com/blog/going-fast-with-sqlite-and-python/
-        self.cur.execute("""PRAGMA journal_mode=WAL""")
-        # self.cur.execute("""PRAGMA synchronous=OFF""") # off? or normal?
-        self.cur.execute("""PRAGMA mmap_size=30000000000""")
-        self.cur.execute(f"""PRAGMA page_size=32768""")
-        if vacuum:
-            self.cur.execute("""VACUUM""")
-            self.cur.execute("""PRAGMA optimize""")
-        self.commit()
+        cmds = [
+            """PRAGMA journal_mode=WAL""",
+            """PRAGMA mmap_size=30000000000""",
+            """PRAGMA page_size=32768""",
+            # """PRAGMA synchronous=OFF"""  # off? or normal?
+        ]
 
-    def get_indexes(self):
-        self.cur.execute("""SELECT name FROM sqlite_master WHERE type='index';""")
-        return self.cur.fetchall()
+        if vacuum:
+            cmds += ["""VACUUM""", """PRAGMA optimize"""]
+
+        self.execute(cmds)
+
+    def get_indexes(self, table_name):
+        return self.execute(f"""PRAGMA table_name(transactions_height)""", resp=True)
+
+    def get_schema(self, table_name: str):
+        return self.execute(f"""PRAGMA table_info({table_name})""", resp=True)
+
+    def query(self, query: str, output=False):
+        self.cur.execute(query)
+        if output:
+            v = self.cur.fetchall()
+            print(v)
 
     def get_all_tables(self):
-        self.cur.execute("""SELECT name FROM sqlite_master WHERE type='table';""")
-        return self.cur.fetchall()
+        return self.execute(
+            """SELECT name FROM sqlite_master WHERE type='table';""", resp=True
+        )
 
     def get_table_schema(self, table: str):
-        self.cur.execute(f"""PRAGMA table_info({table})""")
-        return self.cur.fetchall()
+        return self.execute(f"""PRAGMA table_info({table})""", resp=True)
+
+    def get_msg_types_from_amino(self, tx_amino: str) -> list[str]:
+        possible_msg_types: list[bytes] = regex.findall(
+            AMINO_MESSAGE_REGEX, base64.b64decode(tx_amino)
+        )
+
+        return list(
+            {
+                msg_type.decode("utf-8")
+                for msg_type in possible_msg_types
+                if b"secp256k1.PubKey" not in msg_type  # not a message
+            }
+        )
+
+    def insert_tx(self, height: int, tx_amino: str) -> int:
+        # We insert the data without it being decoded. We can update later
+        tx_hash = txraw_to_hash(tx_amino)
+
+        # Already in table (remove in the future? Only affects inserts so may be fine.)
+        data = self.execute(
+            f"""SELECT id FROM txs WHERE tx_hash='{tx_hash}'""",
+            resp_one=True,
+        )
+        if data is not None:
+            # print("tx_hash already in table")
+            return data[0]
+
+        msg_types = self.get_msg_types_from_amino(tx_amino)
+
+        self.cur.execute(
+            """INSERT INTO txs (height, msg_types, address, tx_hash) VALUES (?, ?, ?, ?)""",
+            (height, json.dumps(msg_types), "", tx_hash),
+        )
+        tx_id = self.cur.lastrowid
+
+        self.execute(
+            f"""INSERT INTO amino_tx (id, tx_amino) VALUES ({tx_id}, '{tx_amino}')""",
+        )
+
+        # input blank JSON now, will update later when we check for the values set to ""/Null. Same for address
+        self.execute(
+            f"""INSERT INTO json_tx (id, tx_json) VALUES ({tx_id}, '')""",
+        )
+
+        return int(tx_id or 0)
+
+    def iter_all_txs_for_decoding(self):
+        return self.execute("""SELECT id, tx_amino FROM amino_tx""", resp=True)
+
+    # use id or the tx_hash? (prob id for the mass decoder)
+    def update_decoded_tx(
+        self, tx_id: int, tx_json: dict, WALLET_PREFIX: str, VALOPER_PREFIX: str
+    ):
+        sender = get_sender(-1, tx_json, WALLET_PREFIX, VALOPER_PREFIX)
+        print(f"Updating Tx: #{tx_id}", sender)
+
+        self.cur.execute(
+            """UPDATE txs SET address=? WHERE id=?""",
+            (sender, tx_id),
+        )
+
+        self.execute(
+            f"""UPDATE json_tx SET tx_json='{json.dumps(tx_json)}' WHERE id={tx_id}""",
+        )
+
+    def get_tx_extremes(self, qOpt: TxQueryOption) -> Tx | None:
+        order_by = "ASC" if qOpt.LATEST else "DESC"
+        data = self.execute(
+            f"""SELECT id FROM txs ORDER BY id {order_by} LIMIT 1""",
+            resp_one=True,
+        )
+        if data is None:
+            return None
+
+        return self.get_tx_by_id(data[0])
+
+    def get_txs_by_ids(
+        self, tx_lower_id: int, tx_upper_id: int, options: list[TxOptions]
+    ) -> list[Tx]:
+        txs: list[Tx] = []
+
+        tx_hashes = self.execute(
+            f"""SELECT tx_hash FROM txs WHERE id BETWEEN {tx_lower_id} AND {tx_upper_id}""",
+            resp=True,
+        )
+
+        if tx_hashes is None:
+            return txs
+
+        for tx_hash in tx_hashes:
+            t = self.get_tx_by_hash(tx_hash[0], options)
+            if t:
+                txs.append(t)
+
+        return txs if tx_hashes is not None else []
+
+    # TODO: Used when we are ensuring all Txs have been properly decoded.
+    def get_txs_not_decoded(self, start_height: int, end_height: int) -> list[Tx]:
+        found = self.execute(
+            f"""SELECT id FROM txs WHERE id NOT IN (SELECT id FROM json_tx) AND height BETWEEN {start_height} AND {end_height}""",
+            resp=True,
+        )
+
+        if found is None:
+            return []
+
+        is_decoded = set(tx_id[0] for tx_id in found)
+
+        to_decode = []
+        for tx_id in range(start_height, end_height + 1):
+            if tx_id not in is_decoded:
+                t = self.get_tx_by_id(
+                    tx_id,
+                    options=[TxOptions.ID, TxOptions.TX_HASH, TxOptions.AMINO],
+                )
+                if t:
+                    to_decode.append(t)
+
+        return to_decode
+
+    def get_tx_json(self, tx_id: int = -1, tx_hash: str = "") -> dict:
+        """
+        Use either the Tx ID or the Tx Hash to get the JSON of the Tx.
+        Returns the dict or {} if none
+        """
+
+        if tx_id != -1 and tx_hash != "":
+            raise ValueError(
+                "tx_id and tx_hash cannot both be set for get_tx_json. Choose 1."
+            )
+
+        # Since we do not save the hash in the Txs, we grab from the parent table.
+        if tx_hash != "":
+            tx_id = self.get_tx_id_from_hash(tx_hash)
+
+        res = self.execute(
+            f"""SELECT tx_json FROM json_tx WHERE id={tx_id}""",
+            resp_one=True,
+        )
+        if res is None:
+            return {}
+
+        return json.loads(res[0])
+
+    def get_tx_id_from_hash(self, tx_hash: str) -> int:
+        res = self.execute(
+            f"""SELECT id FROM txs WHERE tx_hash='{tx_hash}'""",
+            resp_one=True,
+        )
+
+        return res[0] if res is not None else -1
+
+    def get_tx_amino(self, tx_id: int = -1, tx_hash: str = "") -> str:
+        if tx_id == -1 and tx_hash == "":
+            raise ValueError(
+                "tx_id and tx_hash cannot both be set for get_tx_amino. Choose 1."
+            )
+
+        if tx_hash != "":
+            tx_id = self.get_tx_id_from_hash(tx_hash)
+
+        res = self.execute(
+            f"""SELECT tx_amino FROM amino_tx WHERE id={tx_id}""",
+            resp_one=True,
+        )
+
+        return res[0] if res is not None else ""
+
+    def get_tx_by_hash(self, tx_hash: str, options: list[TxOptions] = []) -> Tx | None:
+        # for option in options, make it into a ', '.join
+
+        wantsTxJSON = TxOptions.TX_JSON in options
+        wantsTxAMINO = TxOptions.AMINO in options
+
+        # remove the options if they are in the list
+        options = [
+            option
+            for option in options
+            if option not in [TxOptions.TX_JSON, TxOptions.AMINO]
+        ]
+
+        fields = "*"
+        if len(options) != 0:
+            fields = ", ".join([option.value for option in options])
+
+        tx = self.execute(
+            f"""SELECT {fields} FROM txs WHERE tx_hash='{tx_hash}'""",
+            resp_one=True,
+        )
+        if tx is None:
+            return None
+
+        tx_json = {}
+        if wantsTxJSON:
+            tx_json = self.get_tx_json(tx_hash=tx_hash)
+
+        tx_amino = ""
+        if wantsTxAMINO:
+            # query the AMINO only from said function.
+            tx_amino = self.get_tx_amino(tx_hash=tx_hash)
+
+        # TODO: Events?
+
+        # automatically unpack the fields based off the inputs
+        tx_dict = {}
+        for op in options:
+            tx_dict[op.value] = tx[options.index(op)]
+
+        # set the other defaults based off the key default
+        for tx_type in Tx.__annotations__.keys():
+            if tx_type not in tx_dict:
+                tx_dict[tx_type] = ""
+
+        tx_dict["tx_json"] = tx_json
+        tx_dict["tx_amino"] = tx_amino
+
+        return Tx(**tx_dict)
+
+    def get_txs_by_address_in_range(
+        self, address: str, start_height: int, end_height: int, options: list[TxOptions]
+    ) -> list[Tx]:
+        txs: list[Tx] = []
+
+        # sort Txs by height
+        tx_hashes = self.execute(
+            f"""SELECT tx_hash FROM txs WHERE address='{address}' AND height BETWEEN {start_height} AND {end_height} ORDER BY height ASC""",
+            resp=True,
+        )
+
+        if tx_hashes is None:
+            return txs
+
+        for tx_hash in tx_hashes:
+            t = self.get_tx_by_hash(tx_hash[0], options)
+            if t:
+                txs.append(t)
+
+        return txs
+
+    def get_tx_by_id(self, tx_id: int, options: list[TxOptions] = []) -> Tx | None:
+        tx_hash = self.execute(
+            f"""SELECT tx_hash FROM txs WHERE id={tx_id}""",
+            resp_one=True,
+        )
+
+        if tx_hash is None:
+            return None
+
+        return self.get_tx_by_hash(tx_hash[0], options)
+
+    def get_txs_in_range(
+        self, start_height: int, end_height: int, options: list[TxOptions]
+    ) -> list[Tx]:
+        txs: list[Tx] = []
+
+        # sort Txs by height
+        tx_hashes = self.execute(
+            f"""SELECT tx_hash FROM txs WHERE height BETWEEN {start_height} AND {end_height} ORDER BY height ASC""",
+            resp=True,
+        )
+
+        if tx_hashes is None:
+            return txs
+
+        for tx_hash in tx_hashes:
+            t = self.get_tx_by_hash(tx_hash[0], options)
+            if t:
+                txs.append(t)
+
+        return txs
 
     # ===================================
     # Blocks
     # ===================================
 
-    def insert_block(self, height: int, time: str, txs_ids: list[int]):
-        # insert the height and tx_amino.
-        self.cur.execute(
-            """INSERT INTO blocks (height, time, txs) VALUES (?, ?, ?)""",
-            (height, time, json.dumps(txs_ids)),
-        )
-
-    def get_block(self, block_height: int) -> Block | None:
-        self.cur.execute(
-            """SELECT * FROM blocks WHERE height=?""",
-            (block_height,),
-        )
-        data = self.cur.fetchone()
-        if data is None:
-            return None
-
-        return Block(data[0], data[1], json.loads(data[2]))
-
-    def get_earliest_block(self) -> Block | None:
-        self.cur.execute("""SELECT * FROM blocks ORDER BY height ASC LIMIT 1""")
-        data = self.cur.fetchone()
-        if data is None:
-            return None
-
-        return Block(data[0], data[1], json.loads(data[2]))
-
-    def get_latest_saved_block(self) -> Block | None:
-        self.cur.execute("""SELECT * FROM blocks ORDER BY height DESC LIMIT 1""")
-        data = self.cur.fetchone()
-        if data is None:
-            return None
-
-        return Block(data[0], data[1], json.loads(data[2]))
-
     def get_total_blocks(self) -> int:
-        self.cur.execute("""SELECT COUNT(*) FROM blocks""")
-        data = self.cur.fetchone()
-        if data is None:
-            return 0
-        return data[0]
+        count = self.execute("""SELECT count(*) FROM blocks""", resp=True)
+        return count[0][0]
 
-    def get_missing_blocks(self, start_height, end_height) -> list[int]:
-        # get all blocks which we do not have value for between a range
-        self.cur.execute(
-            """SELECT height FROM blocks WHERE height BETWEEN ? AND ?""",
-            (start_height, end_height),
+    def insert_block(self, height: int, time: str, txs_ids: list[int]):
+        try:
+            self.cur.execute(
+                """INSERT INTO blocks (height, date, txs) VALUES (?, ?, ?)""",
+                (height, time, json.dumps(txs_ids)),
+            )
+        except Exception as e:
+            print("insert_block", e)
+
+    def get_block(
+        self, block_height: int, option: BlockOption = BlockOption.STANDARD
+    ) -> Block:
+        cmd = f"""SELECT height, date, txs FROM blocks WHERE height={block_height}"""
+
+        if option == BlockOption.EARLIEST:
+            cmd = (
+                f"""SELECT height, date, txs FROM blocks ORDER BY height ASC LIMIT 1"""
+            )
+        elif option == BlockOption.LATEST:
+            cmd = (
+                f"""SELECT height, date, txs FROM blocks ORDER BY height DESC LIMIT 1"""
+            )
+
+        b = self.execute(
+            cmd,
+            resp_one=True,
         )
-        data = self.cur.fetchall()
-        if data is None:
-            return list(range(start_height, end_height + 1))
+        if b is None:
+            return Block(-1, "", [])
 
-        found_heights = set(x[0] for x in data)
-        missing_heights = [
-            height
-            for height in range(start_height, end_height + 1)
-            if height not in found_heights
-        ]
-        return missing_heights
+        return Block(b[0], b[1], json.loads(b[2]))
 
-    # ===================================
-    # Transactions
-    # ===================================
-
-    def insert_tx(self, height: int, tx_amino: str):
-        # We insert the data without it being decoded. We can update later
-        # insert the height and tx_amino, then return the unique id
-        # fill the other collums with empty strings
-        # """CREATE TABLE IF NOT EXISTS txs (id INTEGER PRIMARY KEY AUTOINCREMENT, height INTEGER, tx_amino TEXT, msg_types TEXT, tx_json TEXT, address TEXT)"""
-
-        tx_hash = txraw_to_hash(tx_amino)
-        self.cur.execute(
-            """INSERT INTO txs (height, tx_amino, msg_types, tx_json, address, tx_hash) VALUES (?, ?, ?, ?, ?, ?)""",
-            (height, tx_amino, "", "", "", tx_hash),
-        )
-        return self.cur.lastrowid
-
-    def update_tx(self, _id: int, tx_json: str, msg_types: str, address: str):
-        # update the data after we decode it (post insert_tx)
-        self.cur.execute(
-            """UPDATE txs SET tx_json=?, msg_types=?, address=? WHERE id=?""",
-            (tx_json, msg_types, address, _id),
+    def find_missing_blocks(self, start_height: int, end_height: int) -> list[int]:
+        # run a query which finds all missing heights in the range for the blocks table
+        missing = self.execute(
+            f"""SELECT height FROM blocks WHERE height BETWEEN {start_height} AND {end_height}""",
+            resp=True,
         )
 
-    def update_tx_hash(self, _id: int, tx_hash: str):
-        # This is only used for the migration to add this section.
-        self.cur.execute(
-            """UPDATE txs SET tx_hash=? WHERE id=?""",
-            (tx_hash, _id),
+        heights = set(range(start_height, end_height + 1))
+
+        for m in missing:
+            heights.remove(m[0])
+
+        return list(heights)
+
+
+if __name__ == "__main__":
+    import os
+
+    current_dir = os.path.dirname(os.path.realpath(__file__))
+    db = Database(os.path.join(current_dir, "data.db"))
+    db.create_tables()
+    db.optimize_tables()
+    db.optimize_db(vacuum=False)
+
+    print(db.get_total_blocks())
+    print(db.find_missing_blocks(2, 10))
+
+    # Query specific JSON data depending on your needs. Get only what you need, easily unpacked.
+    print(
+        db.get_tx_by_hash(
+            "EF99CD08ECE18098A406A459C0F56C9B9F3F7EB6DCB7D9DA483C974D63C15D4A"
         )
+    )
 
-    def get_tx_by_hash(self, tx_hash: str) -> Tx | None:
-        self.cur.execute(
-            """SELECT id FROM txs WHERE tx_hash=?""",
-            (tx_hash,),
+    print(
+        db.get_tx_by_hash(
+            "EF99CD08ECE18098A406A459C0F56C9B9F3F7EB6DCB7D9DA483C974D63C15D4A",
+            options=[
+                TxOptions.ID,
+                TxOptions.HEIGHT,
+                TxOptions.ADDRESS,
+                TxOptions.TX_JSON,
+            ],
         )
-        data = self.cur.fetchone()
-        if data is None:
-            return None
+    )
 
-        return self.get_tx(data[0])
-
-    def get_tx(self, tx_id: int) -> Tx | None:
-        self.cur.execute(
-            """SELECT * FROM txs WHERE id=?""",
-            (tx_id,),
+    print(
+        db.get_tx_by_hash(
+            "EF99CD08ECE18098A406A459C0F56C9B9F3F7EB6DCB7D9DA483C974D63C15D4A",
+            options=[
+                TxOptions.ID,
+                TxOptions.AMINO,
+            ],
         )
-        data = self.cur.fetchone()
-        if data is None:
-            return None
+    )
 
-        return Tx(data[0], data[1], data[2], data[3], data[4], data[5], data[6] or "")
-
-    def get_tx_specific(self, tx_id: int, fields: list[str]):
-        self.cur.execute(
-            f"""SELECT {','.join(fields)} FROM txs WHERE id=?""",
-            (tx_id,),
+    # wraps the tx_hash function
+    print(
+        db.get_tx_by_id(
+            1,
+            options=[
+                TxOptions.ID,
+                TxOptions.AMINO,
+            ],
         )
-        data = self.cur.fetchone()
-        if data is None:
-            return None
+    )
 
-        # save fields in a dict
-        tx = {}
-        for i in range(len(fields)):
-            tx[fields[i]] = data[i]
+    res = db.get_txs_by_address_in_range(
+        "juno1rkhrfuq7k2k68k0hctrmv8efyxul6tgn8hny6y",
+        0,
+        10_000_000,
+        options=list(tx for tx in TxOptions),
+    )
+    print(len(res))
 
-        # fill in the missing fields with empty strings
-        for tx_type in Tx.__annotations__.keys():
-            if tx_type not in tx:
-                tx[tx_type] = ""
+    exit(1)
 
-        return Tx(**tx)
+    # res = db.get_msg_types_from_amino(
+    #     "CqYJCqcBCiQvY29zbXdhc20ud2FzbS52MS5Nc2dFeGVjdXRlQ29udHJhY3QSfworanVubzFndTkydzN3a3dhd3E2cThlcGRzeWNlNng3cTVnenZ2NTV3MDR5axI/anVubzE5bm53aDQ5bHdzcXk2YzV3ZzlwOTQzeXQ5dHhlNW13NmtkenRlY2w1ajRxM3JneWgwaDBzZWt3bDhjGg97IndpdGhkcmF3Ijp7fX0KpwEKJC9jb3Ntd2FzbS53YXNtLnYxLk1zZ0V4ZWN1dGVDb250cmFjdBJ/CitqdW5vMWd1OTJ3M3drd2F3cTZxOGVwZHN5Y2U2eDdxNWd6dnY1NXcwNHlrEj9qdW5vMTYzdXBlOXlteHRjNWZzeDBrdnJmY3l4OWU1cHV1MnpocXQ4MmxleHJsYWp6bXg5c203OXNoYWM4OGYaD3sid2l0aGRyYXciOnt9fQqnAQokL2Nvc213YXNtLndhc20udjEuTXNnRXhlY3V0ZUNvbnRyYWN0En8KK2p1bm8xZ3U5Mnczd2t3YXdxNnE4ZXBkc3ljZTZ4N3E1Z3p2djU1dzA0eWsSP2p1bm8xeXAwYTdlMnk2Y2MybXR1eDkycXptMjRneXU4NXk4YTJhZGY4NWs5dzMzaHN3ZnpzOGU3cXJsYXpxcxoPeyJ3aXRoZHJhdyI6e319CqcBCiQvY29zbXdhc20ud2FzbS52MS5Nc2dFeGVjdXRlQ29udHJhY3QSfworanVubzFndTkydzN3a3dhd3E2cThlcGRzeWNlNng3cTVnenZ2NTV3MDR5axI/anVubzF3NzVmMm53Z2d6bmhxN2txM3hxbWtmc3pwMnN1YzdmMG0zc3RtcDV2eHg1OXl2bjU3bnRxa2Zmbm4yGg97IndpdGhkcmF3Ijp7fX0KpwEKJC9jb3Ntd2FzbS53YXNtLnYxLk1zZ0V4ZWN1dGVDb250cmFjdBJ/CitqdW5vMWd1OTJ3M3drd2F3cTZxOGVwZHN5Y2U2eDdxNWd6dnY1NXcwNHlrEj9qdW5vMXdjdWNzeTYzZDZybTBjZGM1cXQ2YWtkODZxOG1wMDhoNnBhZHM0NDgwMmdkZ2NlNmFya3E0eHV1dmUaD3sid2l0aGRyYXciOnt9fQqnAQokL2Nvc213YXNtLndhc20udjEuTXNnRXhlY3V0ZUNvbnRyYWN0En8KK2p1bm8xZ3U5Mnczd2t3YXdxNnE4ZXBkc3ljZTZ4N3E1Z3p2djU1dzA0eWsSP2p1bm8xZTlscmo2Nzlnbnl6MzJuZXE5emhoZXIzanAyNzB5d21kbW5zZHFodWV1a2hlYW13NXdscWw5NHN1dhoPeyJ3aXRoZHJhdyI6e319CqcBCiQvY29zbXdhc20ud2FzbS52MS5Nc2dFeGVjdXRlQ29udHJhY3QSfworanVubzFndTkydzN3a3dhd3E2cThlcGRzeWNlNng3cTVnenZ2NTV3MDR5axI/anVubzF5d2F2OGowcDVheng3em40Y2c2YW13aGxudDg1YThoNXgwYWg1NWdlNDBsaGh5c2c2NnBxNngyNjUzGg97IndpdGhkcmF3Ijp7fX0SagpRCkYKHy9jb3Ntb3MuY3J5cHRvLnNlY3AyNTZrMS5QdWJLZXkSIwohAoWVDnsIvM1mME6TpGfTKSV/WBEJ6ec4n+2xcvwKY6yQEgQKAgh/GNIUEhUKDwoFdWp1bm8SBjEzMTA4OBD41moaQEtbKNG8pDhdp7p4vpFpDHcWj3dJ9FY2nAmhjXA2ypyGcD2u5MUTXPyBosdIM//+PbXEyx3Z09IxaIBBIgmdk/k="
+    # )
+    # print(res)
 
-    def get_txs_from_address_in_range(self, address: str) -> list[dict]:
-        txs: list[dict] = []
+    import test_data
 
-        print("Starting to wait...")
-        # get just height,tx_json from txs where the address = address
-        self.cur.execute(
-            """SELECT height FROM txs WHERE address=?""",
-            (address,),
-        )
+    for k, v in test_data.TRANSACTIONS.items():
+        for _tx in v:
+            db.insert_tx(k, _tx)
 
-        data = self.cur.fetchall()
+    # LEGACY: Single decode instance
+    # for tx_id, tx_amino in db.iter_all_txs_for_decoding():
+    # j = _decode_single_test("junod", tx_amino)
+    # db.update_decoded_tx(tx_id, j, "juno", "junovaloper")
 
-        print("Done...")
+    # mass decode
+    j = run_decode_file(
+        "juno-decode",
+        os.path.join(current_dir, "_input.json"),
+        os.path.join(current_dir, "_out.json"),
+    )
+    for res in j:
+        db.update_decoded_tx(res["id"], json.loads(res["tx"]), "juno", "junovaloper")
+    db.commit()
 
-        if data is None:
-            print("No data")
-            return txs
+    # print(db.get_schema("transactions"))
 
-        print("For Loop")
-        for tx in data:
-            txs.append({"height": tx[0], "tx_json": tx[1]})
+    # show all txs in transactions
+    # db.query("""SELECT * FROM transactions""", output=True)
+    # db.query(
+    #     """SELECT * FROM txs""",
+    #     output=True,
+    # )
 
-        print("Return")
-        return txs
+    db.query("""SELECT count(*) FROM txs""", output=True)
+    db.query("""SELECT count(*) FROM amino_tx""", output=True)
+    db.query("""SELECT count(*) FROM json_tx""", output=True)
 
-    def get_txs_by_ids(self, tx_lower_id: int, tx_upper_id: int) -> list[Tx]:
-        txs: list[Tx] = []
+    db.insert_block(3, "2021-01-01 10:10:12", [1, 2, 3, 4, 5])
+    db.commit()
 
-        if tx_lower_id == tx_upper_id or tx_lower_id > tx_upper_id:
-            print("error, tx_lower_id == tx_upper_id or tx_lower_id > tx_upper_id")
-            return txs
+    print(db.get_block(3))
+    print(db.get_block(-1))
 
-        self.cur.execute(
-            """SELECT * FROM txs WHERE id BETWEEN ? AND ?""",
-            (tx_lower_id, tx_upper_id),
-        )
-        data = self.cur.fetchall()
-        if data is None:
-            return txs
+    db.query("""SELECT * FROM blocks""", output=True)
 
-        for tx in data:
-            txs.append(Tx(tx[0], tx[1], tx[2], tx[3], tx[4], tx[5], tx[6] or ""))
+    # select all txs which are from juno1rkhrfuq7k2k68k0hctrmv8efyxul6tgn8hny6y in the database
+    '''
+    for res in db.execute(
+        """SELECT id, height, msg_types FROM txs WHERE address='juno1rkhrfuq7k2k68k0hctrmv8efyxul6tgn8hny6y'""",
+        resp=True,
+    ):
+        print(res)
 
-        return txs
+        if "/cosmwasm.wasm.v1.MsgExecuteContract" in res[2]:
+            # get json
+            tx_json = db.execute(
+                f"""SELECT tx_json FROM json_tx WHERE id={res[0]}""",
+                resp_one=True,
+            )
 
-    def get_last_saved_tx(self) -> Tx | None:
-        self.cur.execute("""SELECT id FROM txs ORDER BY id DESC LIMIT 1""")
-        data = self.cur.fetchone()
-        if data is None:
-            return None
+            print(tx_json)
 
-        return self.get_tx(data[0])
-
-    # Rename this to _in_block_range. As a user could also _in_id_range
-    def get_txs_in_range(self, start_height: int, end_height: int) -> list[Tx]:
-        start = time.time()
-
-        tx_ids = {}
-        # print("Getting txs ids from blocks")
-        for block_index in range(start_height, end_height + 1):
-            b = self.get_block(block_index)
-            if b:
-                for tx_id in b.tx_ids:
-                    tx_ids[tx_id] = True
-
-        txs: list[Tx] = []
-        # print("Getting Txs from found tx_ids")
-        for tx_id in tx_ids:
-            _tx = self.get_tx(tx_id)
-            if _tx:
-                txs.append(_tx)
-
-        # This is ~3.5x slower than above
-        # self.cur.execute(
-        #     """SELECT * FROM txs WHERE height BETWEEN ? AND ?""",
-        #     (start_height, end_height),
-        # )
-        # data = self.cur.fetchall()
-        # if data is None:
-        #     return []
-        # txs: list[Tx] = []
-        # for x in data:
-        #     txs.append(Tx(x[0], x[1], x[2], x[3], x[4], x[5]))
-
-        # print(f"Got {len(txs)} txs in {time.time() - start} seconds")
-
-        return txs
-
-    def get_non_decoded_txs_in_range(
-        self, start_height: int, end_height: int
-    ) -> list[Tx]:
-        # returns all txs which have not been decoded in the json field. This field is "" if not decoded
-        self.cur.execute(
-            """SELECT * FROM txs WHERE height BETWEEN ? AND ?""",
-            (start_height, end_height),
-        )
-        data = self.cur.fetchall()
-        if data is None:
-            return []
-
-        txs: list[Tx] = []
-        for x in data:
-            # check if tx_json is "", if so, add it to the array
-            if len(x[4]) == 0:
-                txs.append(Tx(x[0], x[1], x[2], x[3], x[4], x[5], x[6]))
-
-        return txs
-
-    # def get_users_txs_in_range(
-    #     self, address: str, start_height: int, end_height: int
-    # ) -> list[Tx]:
-    #     latest_block = self.get_latest_saved_block()
-    #     if latest_block is None:
-    #         print("No (latest) blocks saved in Database")
-    #         return []
-
-    #     if end_height > latest_block.height:
-    #         end_height = latest_block.height
-
-    #     print(address, start_height, end_height)
-
-    #     # Select all tx_id from users WHERE address=? AND height BETWEEN ? AND ?
-    #     self.cur.execute(
-    #         """SELECT tx_id FROM users WHERE address=? AND height BETWEEN ? AND ?""",
-    #         (address, start_height, end_height),
-    #     )
-    #     data = self.cur.fetchall()
-
-    #     if data is None:
-    #         return []
-
-    #     txs = []
-    #     for values in data:
-    #         tx = self.get_tx(values[2])
-    #         if tx is not None:
-    #             txs.append(tx)
-    #     return txs
+        # db.query(
+        # query Tx json if
+    '''
