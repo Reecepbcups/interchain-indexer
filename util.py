@@ -22,6 +22,11 @@ def txraw_to_hash(tx_raw_amino: str) -> str:
 def run_decode_file(
     COSMOS_BINARY_FILE: str, file_loc: str, output_file_loc: str
 ) -> dict:
+    # if output_file_loc does not exist, make it
+    if not os.path.exists(output_file_loc):
+        with open(output_file_loc, "w") as f:
+            f.write("{}")
+
     # TODO: What if I just return to stdout instead of an output file, and speef improvement? Need to benchmark
     res = os.popen(
         f"{COSMOS_BINARY_FILE} tx decode-file {file_loc} {output_file_loc}"
