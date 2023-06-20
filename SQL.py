@@ -1,14 +1,12 @@
 import base64
-import inspect
 import json
 import sqlite3
-import time
-from enum import Enum
 from typing import Any
 
 import regex
 
 from chain_types import Block, Tx
+from option_types import BlockOption, TxOptions, TxQueryOption
 from util import _decode_single_test, get_sender, run_decode_file, txraw_to_hash
 
 # ?
@@ -20,29 +18,6 @@ IGNORED_CONTRACTS = {
 AMINO_MESSAGE_REGEX = regex.compile(
     b"\/[a-zA-Z0-9]*\.[a-zA-Z0-9]*\.[a-zA-Z0-9]*\.[a-zA-Z0-9]*"
 )
-
-
-class TxOptions(Enum):
-    # These should match up with the colum names in the table
-    ID = "id"
-    HEIGHT = "height"
-    AMINO = "tx_amino"
-    TX_JSON = "tx_json"
-    MSG_TYPES = "msg_types"
-    ADDRESS = "address"
-    TX_HASH = "tx_hash"
-
-
-class BlockOption(Enum):
-    STANDARD = "standard"
-    EARLIEST = "earliest"
-    LATEST = "latest"
-
-
-class TxQueryOption(Enum):
-    STANDARD = "standard"
-    EARLIEST = "earliest"
-    LATEST = "latest"
 
 
 class Database:
@@ -210,8 +185,11 @@ class Database:
             f"""UPDATE json_tx SET tx_json='{json.dumps(tx_json)}' WHERE id={tx_id}""",
         )
 
-    def get_tx_extremes(self, qOpt: TxQueryOption) -> Tx | None:
-        order_by = "ASC" if qOpt.LATEST else "DESC"
+    def get_tx(self, qOpt: TxQueryOption = TxQueryOption.STANDARD) -> Tx | None:
+        if qOpt == TxQueryOption.STANDARD:
+            raise ValueError("TxQueryOption.STANDARD is not supported yet.")
+
+        order_by = "ASC" if qOpt == qOpt.EARLIEST else "DESC"
         data = self.execute(
             f"""SELECT id FROM txs ORDER BY id {order_by} LIMIT 1""",
             resp_one=True,
@@ -314,10 +292,11 @@ class Database:
         return res[0] if res is not None else ""
 
     def get_tx_by_hash(self, tx_hash: str, options: list[TxOptions] = []) -> Tx | None:
-        # for option in options, make it into a ', '.join
+        wantsTxJSON = TxOptions.TX_JSON in options or len(options) == 0
+        wantsTxAMINO = TxOptions.AMINO in options and len(options) == 0
 
-        wantsTxJSON = TxOptions.TX_JSON in options
-        wantsTxAMINO = TxOptions.AMINO in options
+        if len(options) == 0:
+            options = [tx for tx in TxOptions]
 
         # remove the options if they are in the list
         options = [
@@ -362,6 +341,25 @@ class Database:
         tx_dict["tx_amino"] = tx_amino
 
         return Tx(**tx_dict)
+
+    def get_txs_by_address(
+        self, address: str, options: list[TxOptions] = []
+    ) -> list[Tx]:
+        txs: list[Tx] = []
+        data = self.execute(
+            f"""SELECT tx_hash FROM txs WHERE address='{address}'""",
+            resp=True,
+        )
+
+        if data is None:
+            return txs
+
+        for tx_hash in data:
+            t = self.get_tx_by_hash(tx_hash[0], options)
+            if t:
+                txs.append(t)
+
+        return txs
 
     def get_txs_by_address_in_range(
         self, address: str, start_height: int, end_height: int, options: list[TxOptions]
@@ -483,6 +481,53 @@ if __name__ == "__main__":
     print(db.get_total_blocks())
     print(db.find_missing_blocks(2, 10))
 
+    # res = db.get_msg_types_from_amino(
+    #     "CqYJCqcBCiQvY29zbXdhc20ud2FzbS52MS5Nc2dFeGVjdXRlQ29udHJhY3QSfworanVubzFndTkydzN3a3dhd3E2cThlcGRzeWNlNng3cTVnenZ2NTV3MDR5axI/anVubzE5bm53aDQ5bHdzcXk2YzV3ZzlwOTQzeXQ5dHhlNW13NmtkenRlY2w1ajRxM3JneWgwaDBzZWt3bDhjGg97IndpdGhkcmF3Ijp7fX0KpwEKJC9jb3Ntd2FzbS53YXNtLnYxLk1zZ0V4ZWN1dGVDb250cmFjdBJ/CitqdW5vMWd1OTJ3M3drd2F3cTZxOGVwZHN5Y2U2eDdxNWd6dnY1NXcwNHlrEj9qdW5vMTYzdXBlOXlteHRjNWZzeDBrdnJmY3l4OWU1cHV1MnpocXQ4MmxleHJsYWp6bXg5c203OXNoYWM4OGYaD3sid2l0aGRyYXciOnt9fQqnAQokL2Nvc213YXNtLndhc20udjEuTXNnRXhlY3V0ZUNvbnRyYWN0En8KK2p1bm8xZ3U5Mnczd2t3YXdxNnE4ZXBkc3ljZTZ4N3E1Z3p2djU1dzA0eWsSP2p1bm8xeXAwYTdlMnk2Y2MybXR1eDkycXptMjRneXU4NXk4YTJhZGY4NWs5dzMzaHN3ZnpzOGU3cXJsYXpxcxoPeyJ3aXRoZHJhdyI6e319CqcBCiQvY29zbXdhc20ud2FzbS52MS5Nc2dFeGVjdXRlQ29udHJhY3QSfworanVubzFndTkydzN3a3dhd3E2cThlcGRzeWNlNng3cTVnenZ2NTV3MDR5axI/anVubzF3NzVmMm53Z2d6bmhxN2txM3hxbWtmc3pwMnN1YzdmMG0zc3RtcDV2eHg1OXl2bjU3bnRxa2Zmbm4yGg97IndpdGhkcmF3Ijp7fX0KpwEKJC9jb3Ntd2FzbS53YXNtLnYxLk1zZ0V4ZWN1dGVDb250cmFjdBJ/CitqdW5vMWd1OTJ3M3drd2F3cTZxOGVwZHN5Y2U2eDdxNWd6dnY1NXcwNHlrEj9qdW5vMXdjdWNzeTYzZDZybTBjZGM1cXQ2YWtkODZxOG1wMDhoNnBhZHM0NDgwMmdkZ2NlNmFya3E0eHV1dmUaD3sid2l0aGRyYXciOnt9fQqnAQokL2Nvc213YXNtLndhc20udjEuTXNnRXhlY3V0ZUNvbnRyYWN0En8KK2p1bm8xZ3U5Mnczd2t3YXdxNnE4ZXBkc3ljZTZ4N3E1Z3p2djU1dzA0eWsSP2p1bm8xZTlscmo2Nzlnbnl6MzJuZXE5emhoZXIzanAyNzB5d21kbW5zZHFodWV1a2hlYW13NXdscWw5NHN1dhoPeyJ3aXRoZHJhdyI6e319CqcBCiQvY29zbXdhc20ud2FzbS52MS5Nc2dFeGVjdXRlQ29udHJhY3QSfworanVubzFndTkydzN3a3dhd3E2cThlcGRzeWNlNng3cTVnenZ2NTV3MDR5axI/anVubzF5d2F2OGowcDVheng3em40Y2c2YW13aGxudDg1YThoNXgwYWg1NWdlNDBsaGh5c2c2NnBxNngyNjUzGg97IndpdGhkcmF3Ijp7fX0SagpRCkYKHy9jb3Ntb3MuY3J5cHRvLnNlY3AyNTZrMS5QdWJLZXkSIwohAoWVDnsIvM1mME6TpGfTKSV/WBEJ6ec4n+2xcvwKY6yQEgQKAgh/GNIUEhUKDwoFdWp1bm8SBjEzMTA4OBD41moaQEtbKNG8pDhdp7p4vpFpDHcWj3dJ9FY2nAmhjXA2ypyGcD2u5MUTXPyBosdIM//+PbXEyx3Z09IxaIBBIgmdk/k="
+    # )
+    # print(res)
+
+    import test_data
+
+    for k, v in test_data.TRANSACTIONS.items():
+        for _tx in v:
+            db.insert_tx(k, _tx)
+
+    # LEGACY: Single decode instance
+    # for tx_id, tx_amino in db.iter_all_txs_for_decoding():
+    # j = _decode_single_test("junod", tx_amino)
+    # db.update_decoded_tx(tx_id, j, "juno", "junovaloper")
+
+    # mass decode
+    j = run_decode_file(
+        "juno-decode",
+        os.path.join(current_dir, "_input.json"),
+        os.path.join(current_dir, "_out.json"),
+    )
+    for res in j:
+        db.update_decoded_tx(res["id"], json.loads(res["tx"]), "juno", "junovaloper")
+    db.commit()
+
+    # print(db.get_schema("transactions"))
+
+    # show all txs in transactions
+    # db.query("""SELECT * FROM transactions""", output=True)
+    # db.query(
+    #     """SELECT * FROM txs""",
+    #     output=True,
+    # )
+
+    db.query("""SELECT count(*) FROM txs""", output=True)
+    db.query("""SELECT count(*) FROM amino_tx""", output=True)
+    db.query("""SELECT count(*) FROM json_tx""", output=True)
+
+    db.insert_block(3, "2021-01-01 10:10:12", [1, 2, 3, 4, 5])
+    db.commit()
+
+    print(db.get_block(3))
+    print(db.get_block(-1))
+
+    db.query("""SELECT * FROM blocks""", output=True)
+
     # Query specific JSON data depending on your needs. Get only what you need, easily unpacked.
     print(
         db.get_tx_by_hash(
@@ -530,55 +575,6 @@ if __name__ == "__main__":
         options=list(tx for tx in TxOptions),
     )
     print(len(res))
-
-    exit(1)
-
-    # res = db.get_msg_types_from_amino(
-    #     "CqYJCqcBCiQvY29zbXdhc20ud2FzbS52MS5Nc2dFeGVjdXRlQ29udHJhY3QSfworanVubzFndTkydzN3a3dhd3E2cThlcGRzeWNlNng3cTVnenZ2NTV3MDR5axI/anVubzE5bm53aDQ5bHdzcXk2YzV3ZzlwOTQzeXQ5dHhlNW13NmtkenRlY2w1ajRxM3JneWgwaDBzZWt3bDhjGg97IndpdGhkcmF3Ijp7fX0KpwEKJC9jb3Ntd2FzbS53YXNtLnYxLk1zZ0V4ZWN1dGVDb250cmFjdBJ/CitqdW5vMWd1OTJ3M3drd2F3cTZxOGVwZHN5Y2U2eDdxNWd6dnY1NXcwNHlrEj9qdW5vMTYzdXBlOXlteHRjNWZzeDBrdnJmY3l4OWU1cHV1MnpocXQ4MmxleHJsYWp6bXg5c203OXNoYWM4OGYaD3sid2l0aGRyYXciOnt9fQqnAQokL2Nvc213YXNtLndhc20udjEuTXNnRXhlY3V0ZUNvbnRyYWN0En8KK2p1bm8xZ3U5Mnczd2t3YXdxNnE4ZXBkc3ljZTZ4N3E1Z3p2djU1dzA0eWsSP2p1bm8xeXAwYTdlMnk2Y2MybXR1eDkycXptMjRneXU4NXk4YTJhZGY4NWs5dzMzaHN3ZnpzOGU3cXJsYXpxcxoPeyJ3aXRoZHJhdyI6e319CqcBCiQvY29zbXdhc20ud2FzbS52MS5Nc2dFeGVjdXRlQ29udHJhY3QSfworanVubzFndTkydzN3a3dhd3E2cThlcGRzeWNlNng3cTVnenZ2NTV3MDR5axI/anVubzF3NzVmMm53Z2d6bmhxN2txM3hxbWtmc3pwMnN1YzdmMG0zc3RtcDV2eHg1OXl2bjU3bnRxa2Zmbm4yGg97IndpdGhkcmF3Ijp7fX0KpwEKJC9jb3Ntd2FzbS53YXNtLnYxLk1zZ0V4ZWN1dGVDb250cmFjdBJ/CitqdW5vMWd1OTJ3M3drd2F3cTZxOGVwZHN5Y2U2eDdxNWd6dnY1NXcwNHlrEj9qdW5vMXdjdWNzeTYzZDZybTBjZGM1cXQ2YWtkODZxOG1wMDhoNnBhZHM0NDgwMmdkZ2NlNmFya3E0eHV1dmUaD3sid2l0aGRyYXciOnt9fQqnAQokL2Nvc213YXNtLndhc20udjEuTXNnRXhlY3V0ZUNvbnRyYWN0En8KK2p1bm8xZ3U5Mnczd2t3YXdxNnE4ZXBkc3ljZTZ4N3E1Z3p2djU1dzA0eWsSP2p1bm8xZTlscmo2Nzlnbnl6MzJuZXE5emhoZXIzanAyNzB5d21kbW5zZHFodWV1a2hlYW13NXdscWw5NHN1dhoPeyJ3aXRoZHJhdyI6e319CqcBCiQvY29zbXdhc20ud2FzbS52MS5Nc2dFeGVjdXRlQ29udHJhY3QSfworanVubzFndTkydzN3a3dhd3E2cThlcGRzeWNlNng3cTVnenZ2NTV3MDR5axI/anVubzF5d2F2OGowcDVheng3em40Y2c2YW13aGxudDg1YThoNXgwYWg1NWdlNDBsaGh5c2c2NnBxNngyNjUzGg97IndpdGhkcmF3Ijp7fX0SagpRCkYKHy9jb3Ntb3MuY3J5cHRvLnNlY3AyNTZrMS5QdWJLZXkSIwohAoWVDnsIvM1mME6TpGfTKSV/WBEJ6ec4n+2xcvwKY6yQEgQKAgh/GNIUEhUKDwoFdWp1bm8SBjEzMTA4OBD41moaQEtbKNG8pDhdp7p4vpFpDHcWj3dJ9FY2nAmhjXA2ypyGcD2u5MUTXPyBosdIM//+PbXEyx3Z09IxaIBBIgmdk/k="
-    # )
-    # print(res)
-
-    import test_data
-
-    for k, v in test_data.TRANSACTIONS.items():
-        for _tx in v:
-            db.insert_tx(k, _tx)
-
-    # LEGACY: Single decode instance
-    # for tx_id, tx_amino in db.iter_all_txs_for_decoding():
-    # j = _decode_single_test("junod", tx_amino)
-    # db.update_decoded_tx(tx_id, j, "juno", "junovaloper")
-
-    # mass decode
-    j = run_decode_file(
-        "juno-decode",
-        os.path.join(current_dir, "_input.json"),
-        os.path.join(current_dir, "_out.json"),
-    )
-    for res in j:
-        db.update_decoded_tx(res["id"], json.loads(res["tx"]), "juno", "junovaloper")
-    db.commit()
-
-    # print(db.get_schema("transactions"))
-
-    # show all txs in transactions
-    # db.query("""SELECT * FROM transactions""", output=True)
-    # db.query(
-    #     """SELECT * FROM txs""",
-    #     output=True,
-    # )
-
-    db.query("""SELECT count(*) FROM txs""", output=True)
-    db.query("""SELECT count(*) FROM amino_tx""", output=True)
-    db.query("""SELECT count(*) FROM json_tx""", output=True)
-
-    db.insert_block(3, "2021-01-01 10:10:12", [1, 2, 3, 4, 5])
-    db.commit()
-
-    print(db.get_block(3))
-    print(db.get_block(-1))
-
-    db.query("""SELECT * FROM blocks""", output=True)
 
     # select all txs which are from juno1rkhrfuq7k2k68k0hctrmv8efyxul6tgn8hny6y in the database
     '''

@@ -10,6 +10,7 @@ current_dir = os.path.dirname(os.path.realpath(__file__))
 parent = os.path.dirname(current_dir)
 sys.path.append(parent)
 
+from option_types import BlockOption, TxOptions, TxQueryOption
 from SQL import Block, Database, Tx
 
 db = Database(os.path.join(current_dir, os.path.join(parent, "data.db")))
@@ -17,18 +18,18 @@ if db is None:
     print("No db found")
     exit(1)
 
-earliest_block = db.get_earliest_block()
+earliest_block = db.get_block(-1, BlockOption.EARLIEST)
 if earliest_block is None:
     print("No blocks found in db")
     exit(1)
 
-latest_block = db.get_latest_saved_block()
+latest_block = db.get_block(-1, BlockOption.LATEST)
 if latest_block is None:
     print("No blocks found in db")
     exit(1)
 
 
-last_tx_saved = db.get_last_saved_tx()
+last_tx_saved = db.get_tx(TxQueryOption.LATEST)
 if last_tx_saved is None:
     print("No txs found in db")
     exit(1)
@@ -46,3 +47,9 @@ class DBInformation:
     latest_block: Optional[Block] = latest_block
 
     last_tx_saved: Optional[Tx] = last_tx_saved
+
+
+if __name__ == "__main__":
+    print(earliest_block)
+    print(latest_block)
+    print(last_tx_saved)

@@ -24,7 +24,9 @@ INTERACTION_CUTOFF = 100
 
 
 db = Database(os.path.join(current_dir, os.path.join(parent, "data.db")))
-latest_block = db.get_latest_saved_block()
+latest_block = db.get_block(
+    -1,
+)
 if latest_block is None:
     print("No blocks found in db")
     exit(1)
