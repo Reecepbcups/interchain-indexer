@@ -11,32 +11,31 @@ current_dir = os.path.dirname(os.path.realpath(__file__))
 parent = os.path.dirname(current_dir)
 sys.path.append(parent)
 
+from base_script import earliest_block, last_tx_saved, latest_block
+
+from option_types import BlockOption, TxOptions
 from SQL import Database
 
 db = Database(os.path.join(current_dir, os.path.join(parent, "data.db")))
 
-latest_block = db.get_latest_saved_block()
-if latest_block is None:
-    print("No blocks found in db")
-    exit(1)
-
 
 START_BLOCK = 1
-# START_BLOCK = latest_block.height - 100_000  # ump all_interactions to file
-END_BLOCK = latest_block.height
+# END_BLOCK = latest_block.height
+END_BLOCK = 10_000_000
 
 print(f"Getting all transactions in range of blocks: {START_BLOCK} to {END_BLOCK}")
-all_txs = db.get_txs_in_range(START_BLOCK, END_BLOCK)
+all_txs = db.get_txs_in_range(
+    START_BLOCK, END_BLOCK, options=[TxOptions.MSG_TYPES, TxOptions.TX_JSON]
+)
 print(f"Total Txs found: {len(all_txs):,}")
 
-# msg_type: amount
 all_interactions: dict[str, int] = {}
+
 for tx in all_txs:
     if len(tx.msg_types) == 0:
         continue
 
-    _json = json.loads(tx.tx_json)
-    for msg in _json["body"]["messages"]:
+    for msg in tx.tx_json["body"]["messages"]:
         if msg["@type"] not in all_interactions:
             all_interactions[msg["@type"]] = 0
         all_interactions[msg["@type"]] += 1

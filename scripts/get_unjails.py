@@ -9,26 +9,29 @@ current_dir = os.path.dirname(os.path.realpath(__file__))
 parent = os.path.dirname(current_dir)
 sys.path.append(parent)
 
-from SQL import Database
+from base_script import current_dir, db, earliest_block, last_tx_saved, latest_block
 
-db = Database(os.path.join(current_dir, os.path.join(parent, "data.db")))
-
-latest_block = db.get_latest_saved_block()
-if latest_block is None:
-    print("No blocks found in db")
-    exit(1)
+from option_types import TxOptions
 
 # unique_msgs = {}
 unjails = []
 for i in range(1, 1_000_000):
-    tx = db.get_tx(i)
+    tx = db.get_tx_by_id(
+        i,
+        options=[
+            TxOptions.ID,
+            TxOptions.HEIGHT,
+            TxOptions.MSG_TYPES,
+            TxOptions.TX_JSON,
+        ],
+    )
     if tx is None:
         continue
 
     if "slashing." not in tx.msg_types:
         continue
 
-    tx_json = json.loads(tx.tx_json)
+    tx_json = tx.tx_json
     for msg in tx_json["body"]["messages"]:
         if msg["@type"] != "/cosmos.slashing.v1beta1.MsgUnjail":
             continue

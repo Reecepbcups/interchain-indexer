@@ -50,7 +50,7 @@ IGNORE_PROPOSAL_IDS = [
     "94",  # spam
 ]
 
-all_txs = db.get_txs_in_range(START_BLOCK, END_BLOCK)
+all_txs = db.get_txs_in_range(START_BLOCK, END_BLOCK, options=[])
 
 
 all_proposals_during_time = set()
@@ -68,7 +68,7 @@ for tx in all_txs:
 
     # Gets vote messages in this Tx. Both direct & as authz.
     if "/cosmos.authz.v1beta1.MsgExec" in tx.msg_types or "MsgVote" in tx.msg_types:
-        for msg in json.loads(tx.tx_json)["body"]["messages"]:
+        for msg in tx.tx_json["body"]["messages"]:
             # print(msg)
             if "MsgVote" in msg["@type"]:
                 vote_msgs.append(msg)

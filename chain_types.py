@@ -27,6 +27,7 @@ class Tx:
     height: int
     tx_amino: str
     msg_types: list[str]  # JSON.load
-    tx_json: str
+    tx_json: dict
     address: str
     tx_hash: str
+    # tx_events: str #? this or list[str] ?

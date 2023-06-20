@@ -13,6 +13,9 @@ current_dir = os.path.dirname(os.path.realpath(__file__))
 parent = os.path.dirname(current_dir)
 sys.path.append(parent)
 
+from base_script import earliest_block, last_tx_saved, latest_block
+
+from option_types import TxOptions
 from SQL import Database
 
 db = Database(os.path.join(current_dir, os.path.join(parent, "data.db")))
@@ -20,21 +23,6 @@ if db is None:
     print("No db found")
     exit(1)
 
-earliest_block = db.get_earliest_block()
-if earliest_block is None:
-    print("No blocks found in db")
-    exit(1)
-
-latest_block = db.get_latest_saved_block()
-if latest_block is None:
-    print("No blocks found in db")
-    exit(1)
-
-
-last_tx_saved = db.get_last_saved_tx()
-if last_tx_saved is None:
-    print("No txs found in db")
-    exit(1)
 print(f"{last_tx_saved.id=}")
 
 
@@ -60,7 +48,8 @@ def find_closest_key(target_key):
 
 # for i in range(1, last_tx_saved.id):
 for i in range(1, last_tx_saved.id):
-    tx = db.get_tx_specific(i, fields=["id", "height", "tx_json"])
+    # tx = db.get_tx_specific(i, fields=["id", "height", "tx_json"])
+    tx = db.get_tx_by_id(i, options=[TxOptions.ID, TxOptions.HEIGHT, TxOptions.TX_JSON])
     if tx is None:
         continue
 
@@ -69,7 +58,7 @@ for i in range(1, last_tx_saved.id):
         continue
 
     height = tx.height
-    tx_json = json.loads(tx.tx_json)
+    tx_json = tx.tx_json
     fees = tx_json["auth_info"]["fee"]["amount"]
 
     if tx.id % 50_000 == 0:

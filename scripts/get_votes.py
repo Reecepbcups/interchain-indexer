@@ -11,18 +11,12 @@ current_dir = os.path.dirname(os.path.realpath(__file__))
 parent = os.path.dirname(current_dir)
 sys.path.append(parent)
 
+from base_script import current_dir, db, earliest_block, last_tx_saved, latest_block
+
 from SQL import Database
 
-db = Database(os.path.join(current_dir, os.path.join(parent, "data.db")))
-
-latest_block = db.get_latest_saved_block()
-if latest_block is None:
-    print("No blocks found in db")
-    exit(1)
-print(latest_block)
-
 # get all transactions in the last 11 days, height 7755721 to 7919651 (April 20th)
-all_txs = db.get_txs_in_range(7755721, 7919651)
+all_txs = db.get_txs_in_range(7755721, 7919651, options=[])
 print(f"Total Txs: {len(all_txs):,}")
 
 
@@ -37,7 +31,7 @@ for tx in all_txs:
 
     # print(tx.msg_types)
     if "MsgVote" in tx.msg_types:
-        _json = json.loads(tx.tx_json)
+        _json = tx.tx_json
         for msg in _json["body"]["messages"]:
             # Add AUTHZ support?
             if msg["@type"] == "/cosmos.gov.v1beta1.MsgVote":

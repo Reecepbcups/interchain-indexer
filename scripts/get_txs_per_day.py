@@ -12,13 +12,13 @@ Steps:
 import json
 import os
 
-from base_script import DBInformation as scheme
+from base_script import current_dir, db, earliest_block, last_tx_saved, latest_block
 
 days: dict[str, int] = {}
 
 # iter blocks
-for i in range(scheme.earliest_block.height, scheme.latest_block.height):
-    block = scheme.database.get_block(i)
+for i in range(earliest_block.height, latest_block.height):
+    block = db.get_block(i)
     if block is None:
         continue
 
@@ -35,6 +35,6 @@ for i in range(scheme.earliest_block.height, scheme.latest_block.height):
     #     print(days)
     #     exit(1)
 
-file_path = os.path.join(scheme.current_dir, "all_txs_per_day.json")
+file_path = os.path.join(current_dir, "all_txs_per_day.json")
 with open(file_path, "w") as f:
     json.dump(days, f, indent=4)

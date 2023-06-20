@@ -25,6 +25,9 @@ current_dir = os.path.dirname(os.path.realpath(__file__))
 parent = os.path.dirname(current_dir)
 sys.path.append(parent)
 
+from base_script import earliest_block, last_tx_saved, latest_block
+
+from option_types import BlockOption, TxQueryOption
 from SQL import Database
 
 # 5779678 -> 7990650
@@ -33,24 +36,8 @@ if db is None:
     print("No db found")
     exit(1)
 
-earliest_block = db.get_earliest_block()
-if earliest_block is None:
-    print("No blocks found in db")
-    exit(1)
 
-latest_block = db.get_latest_saved_block()
-if latest_block is None:
-    print("No blocks found in db")
-    exit(1)
-
-
-# last_tx_saved = db.get_last_saved_tx().id
-last_tx_saved = db.get_last_saved_tx()
-if last_tx_saved is None:
-    print("No txs found in db")
-    exit(1)
 print(f"{last_tx_saved.id=}")
-# exit(1)
 
 ibc_txs = {
     # '/ibc.applications.transfer.v1.MsgTransfer'
@@ -102,11 +89,11 @@ for i in range(1, last_tx_saved.id):
     if i % 10_000 == 0:
         print(f"Tx {i}")
 
-    tx = db.get_tx(i)
+    tx = db.get_tx_by_id(i)
     if tx is None:
         continue
 
-    tx_json = json.loads(tx.tx_json)
+    tx_json = tx.tx_json
 
     msg: dict
     for msg in list(tx_json["body"]["messages"]):
