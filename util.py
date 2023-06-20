@@ -30,16 +30,20 @@ def run_decode_file(
         return json.load(f)
 
 
+def _decode_single_test(COSMOS_BINARY_FILE: str, amino: str) -> dict:
+    cmd = f"{COSMOS_BINARY_FILE} tx decode {amino} --output json"
+    res = os.popen(cmd).read()
+    return json.loads(res)
+
+
 def command_exists(cmd):
     if which(cmd) == None:
         return False
     return True
 
 
-def get_sender(
-    height: int, msg: dict, WALLET_PREFIX: str, VALOPER_PREFIX: str
-) -> str | None:
-    # MultibankSend not yet supported
+def get_sender(height: int, msg: dict, WALLET_PREFIX: str, VALOPER_PREFIX: str) -> str:
+    # MultibankSend not supported (SDK limitation.)
     keys = [
         "sender",
         "delegator_address",
@@ -52,11 +56,20 @@ def get_sender(
     ]
 
     for key in keys:
-        if key in msg.keys():
+        if key in dict(msg["body"]).keys():
             return msg[key]
 
     # tries to find the sender in the msg even if the key is not found
-    for key, value in msg.items():
+    for key, value in dict(msg["body"]).items():
+        # print(key, value)
+
+        if key == "messages":
+            subMsg: dict
+            for subMsg in list(value):
+                for k, v in subMsg.items():
+                    if k in keys:
+                        return v
+
         if not isinstance(value, str):
             continue
 
@@ -73,7 +86,7 @@ def get_sender(
     with open(os.path.join(current_dir, "no_sender_error.txt"), "a") as f:
         f.write(f"Height:{height} -" + str(msg) + "\n\n")
 
-    return None
+    return "UKNOWN"
 
 
 def get_latest_chain_height(RPC_ARCHIVE: str) -> int:
