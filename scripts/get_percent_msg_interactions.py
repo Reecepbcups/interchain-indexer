@@ -11,15 +11,12 @@ current_dir = os.path.dirname(os.path.realpath(__file__))
 parent = os.path.dirname(current_dir)
 sys.path.append(parent)
 
+from base_script import earliest_block, last_tx_saved, latest_block
+
 from option_types import BlockOption, TxOptions
 from SQL import Database
 
 db = Database(os.path.join(current_dir, os.path.join(parent, "data.db")))
-
-latest_block = db.get_block(-1, BlockOption.LATEST)
-if latest_block is None:
-    print("No blocks found in db")
-    exit(1)
 
 
 START_BLOCK = 1

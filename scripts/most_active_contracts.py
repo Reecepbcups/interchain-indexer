@@ -12,14 +12,9 @@ current_dir = os.path.dirname(os.path.realpath(__file__))
 parent = os.path.dirname(current_dir)
 sys.path.append(parent)
 
+from base_script import current_dir, db, earliest_block, last_tx_saved, latest_block
+
 from SQL import Database
-
-db = Database(os.path.join(current_dir, os.path.join(parent, "data.db")))
-
-latest_block = db.get_latest_saved_block()
-if latest_block is None:
-    print("No blocks found in db")
-    exit(1)
 
 # get all transactions in the last 11 days, height 7755721 to 7919651 (April 20th)
 # START_BLOCK = latest_block.height - 1_000_000
@@ -28,7 +23,7 @@ END_BLOCK = latest_block.height
 INTERACTION_CUTOFF = 100
 
 print(f"Getting all transactions in range of blocks: {START_BLOCK} to {END_BLOCK}")
-all_txs = db.get_txs_in_range(START_BLOCK, END_BLOCK)
+all_txs = db.get_txs_in_range(START_BLOCK, END_BLOCK, options=[])
 print(f"Total Txs found: {len(all_txs):,}")
 
 # contract_addr: amount
@@ -40,7 +35,7 @@ for tx in all_txs:
     if "MsgExecuteContract" not in tx.msg_types:
         continue
 
-    _json = json.loads(tx.tx_json)
+    _json = tx.tx_json
     for msg in _json["body"]["messages"]:
         # Add AUTHZ support?
         if msg["@type"] == "/cosmwasm.wasm.v1.MsgExecuteContract":

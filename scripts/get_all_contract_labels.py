@@ -39,7 +39,7 @@ END_BLOCK = latest_block.height
 # Logic
 
 print(f"Getting all transactions in range of blocks: {START_BLOCK} to {END_BLOCK}")
-all_txs = db.get_txs_in_range(START_BLOCK, END_BLOCK)
+all_txs = db.get_txs_in_range(START_BLOCK, END_BLOCK, options=[])
 print(f"Total Txs found: {len(all_txs):,}")
 
 
@@ -68,7 +68,7 @@ for tx in all_txs:
     if "MsgExecuteContract" not in tx.msg_types:
         continue
 
-    _json = json.loads(tx.tx_json)
+    _json = tx.tx_json
     for msg in _json["body"]["messages"]:
         # Add AUTHZ support?
         if msg["@type"] == "/cosmwasm.wasm.v1.MsgExecuteContract":

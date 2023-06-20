@@ -185,7 +185,7 @@ class Database:
             f"""UPDATE json_tx SET tx_json='{json.dumps(tx_json)}' WHERE id={tx_id}""",
         )
 
-    def get_tx(self, qOpt: TxQueryOption = TxQueryOption.STANDARD) -> Tx | None:
+    def get_tx(self, qOpt: TxQueryOption = TxQueryOption.STANDARD) -> Tx:
         if qOpt == TxQueryOption.STANDARD:
             raise ValueError("TxQueryOption.STANDARD is not supported yet.")
 
@@ -195,7 +195,7 @@ class Database:
             resp_one=True,
         )
         if data is None:
-            return None
+            return Tx(-1, -1, "", "", "", "", "")
 
         return self.get_tx_by_id(data[0])
 
@@ -291,7 +291,7 @@ class Database:
 
         return res[0] if res is not None else ""
 
-    def get_tx_by_hash(self, tx_hash: str, options: list[TxOptions] = []) -> Tx | None:
+    def get_tx_by_hash(self, tx_hash: str, options: list[TxOptions] = []) -> Tx:
         wantsTxJSON = TxOptions.TX_JSON in options or len(options) == 0
         wantsTxAMINO = TxOptions.AMINO in options or len(options) == 0
 
@@ -314,7 +314,7 @@ class Database:
             resp_one=True,
         )
         if tx is None:
-            return None
+            return Tx(-1, -1, "", "", "", "", "")
 
         tx_json = {}
         if wantsTxJSON:
@@ -382,14 +382,14 @@ class Database:
 
         return txs
 
-    def get_tx_by_id(self, tx_id: int, options: list[TxOptions] = []) -> Tx | None:
+    def get_tx_by_id(self, tx_id: int, options: list[TxOptions] = []) -> Tx:
         tx_hash = self.execute(
             f"""SELECT tx_hash FROM txs WHERE id={tx_id}""",
             resp_one=True,
         )
 
         if tx_hash is None:
-            return None
+            return Tx(-1, -1, "", "", "", "", "")
 
         return self.get_tx_by_hash(tx_hash[0], options)
 

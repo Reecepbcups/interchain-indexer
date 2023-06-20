@@ -43,10 +43,10 @@ class DBInformation:
 
     database: Database = db
 
-    earliest_block: Optional[Block] = earliest_block
-    latest_block: Optional[Block] = latest_block
+    earliest_block: Block = earliest_block
+    latest_block: Block = latest_block
 
-    last_tx_saved: Optional[Tx] = last_tx_saved
+    last_tx_saved: Tx = last_tx_saved
 
 
 if __name__ == "__main__":
