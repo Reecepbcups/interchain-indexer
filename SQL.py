@@ -293,7 +293,7 @@ class Database:
 
     def get_tx_by_hash(self, tx_hash: str, options: list[TxOptions] = []) -> Tx | None:
         wantsTxJSON = TxOptions.TX_JSON in options or len(options) == 0
-        wantsTxAMINO = TxOptions.AMINO in options and len(options) == 0
+        wantsTxAMINO = TxOptions.AMINO in options or len(options) == 0
 
         if len(options) == 0:
             options = [tx for tx in TxOptions]
@@ -435,6 +435,8 @@ class Database:
         self, block_height: int, option: BlockOption = BlockOption.STANDARD
     ) -> Block:
         cmd = f"""SELECT height, date, txs FROM blocks WHERE height={block_height}"""
+
+        print(option)
 
         if option == BlockOption.EARLIEST:
             cmd = (

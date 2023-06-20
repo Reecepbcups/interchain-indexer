@@ -48,6 +48,8 @@ def main():
             TxOptions.ID,
             TxOptions.HEIGHT,
             TxOptions.MSG_TYPES,
+            # TxOptions.AMINOtw
+            TxOptions.TX_JSON,
         ],
     )
     print("Addr Tx Stats", len(res))
