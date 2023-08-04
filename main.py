@@ -344,12 +344,12 @@ def do_decode(lowest_height: int, highest_height: int):
         start_height = group.start
         end_height = group.end
         print(
-            f"Decoding Group: {start_height}->{end_height} ({end_height - start_height} blocks)"
+            f"Decoding Group: {start_height:,}->{end_height:,} ({(end_height - start_height):,} blocks)"
         )
 
         txs = db.get_non_decoded_txs_in_range(start_height, end_height)
         print(
-            f"Total non decoded Txs in Blocks: {start_height}->{end_height}: Txs #:{len(txs)}"
+            f"Total non decoded Txs in Blocks: {start_height:,}->{end_height:,}: Txs #:{len(txs):,}"
         )
 
         # Get what Txs we need to decode for the custom -decode binary

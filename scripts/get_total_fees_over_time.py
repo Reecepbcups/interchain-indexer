@@ -20,26 +20,32 @@ if db is None:
     print("No db found")
     exit(1)
 
-earliest_block = db.get_earliest_block()
+# earliest_block = db.get_earliest_block()
+earliest_block = db.get_block(8540001) # ensure this has a single tx at minimum, else increase +1 until.
 if earliest_block is None:
     print("No blocks found in db")
     exit(1)
 
-latest_block = db.get_latest_saved_block()
+latest_block = db.get_block(8740000-2)
+# latest_block = db.get_latest_saved_block()
 if latest_block is None:
     print("No blocks found in db")
     exit(1)
 
+earliest_tx_id = 18_000_000
+# last_tx_saved_id = db.get_tx(latest_block.tx_ids[0]).id
+last_tx_saved_id = 20_784_379
 
-last_tx_saved = db.get_last_saved_tx()
-if last_tx_saved is None:
-    print("No txs found in db")
-    exit(1)
-print(f"{last_tx_saved.id=}")
+# last_saved_tx_id = last_tx_saved.id
+# if last_tx_saved is None:
+#     print("No txs found in db")
+#     exit(1)
+# print(f"{last_saved_tx_id=}")
 
 
 seconds_in_a_day = 86_400
-blocks_in_a_week = (seconds_in_a_day * 7) / 6
+# blocks_in_a_week = (seconds_in_a_day * 7) / 6
+blocks_in_a_week = (seconds_in_a_day) / 6
 
 
 # weekend_height_key: [{"ujuno": 10000}]
@@ -49,7 +55,7 @@ total_ujuno_fees_paid_lifetime = 0
 # height key : amount
 total_txs_per_week: dict[int, int] = {}
 
-# height where its based off the week
+# height where its based off the week, 30m is arbitrary
 total_fees_paid = {k: {} for k in range(1, 30_000_000, int(blocks_in_a_week))}
 
 
@@ -58,8 +64,7 @@ def find_closest_key(target_key):
     return closest_key
 
 
-# for i in range(1, last_tx_saved.id):
-for i in range(1, last_tx_saved.id):
+for i in range(earliest_tx_id, last_tx_saved_id):
     tx = db.get_tx_specific(i, fields=["id", "height", "tx_json"])
     if tx is None:
         continue
